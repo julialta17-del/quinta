@@ -4,7 +4,7 @@ on:
   schedule:
     - cron: "00 18 * * *"   # 17:30 Argentina
     - cron: "00 00 * * *"    # 23:45 Argentina
-  
+  workflow_dispatch:        # Para ejecutarlo a mano
 
 jobs:
   run-bot:
