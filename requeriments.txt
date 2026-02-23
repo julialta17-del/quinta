@@ -1,0 +1,7 @@
+selenium
+webdriver-manager
+gspread
+google-auth
+pandas
+xlrd
+openpyxl
