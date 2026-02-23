@@ -33,4 +33,4 @@ jobs:
         env:
           GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
         # Si el archivo está en una carpeta, recuerda poner: python carpeta/ejecutar_bot_clientes.py
-        run: python ejecutar_bot_clientes.py
+        run: python ejecutar_bot_clientes.yml
