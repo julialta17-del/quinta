@@ -1,1 +1,29 @@
+name: clientes_quinta
 
+on:
+  schedule:
+    - cron: "00 18 * * *"   # 17:30 Argentina
+    - cron: "00 00 * * *"    # 23:45 Argentina
+  
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Run bot
+        env:
+          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+        run: python ejecutar_bot_clientes.py
