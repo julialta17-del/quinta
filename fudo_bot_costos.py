@@ -39,8 +39,8 @@ try:
     driver.get("https://app-v2.fu.do/app/#!/products")
     user_input = wait.until(EC.presence_of_element_located((By.ID, "user")))
     pass_input = driver.find_element(By.ID, "password")
-    user_input.send_keys("admin@bigsaladssexta")
-    pass_input.send_keys("bigsexta")
+    user_input.send_keys("gestion@bigsaladsquinta")
+    pass_input.send_keys("BigQuinta22")
     pass_input.submit()
     
     exportar_btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "a[ert-download-file='downloadProducts()']")))
@@ -71,3 +71,4 @@ except Exception as e:
     print(f"Error crítico: {e}")
 finally:
     driver.quit()
+
