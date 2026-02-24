@@ -25,7 +25,7 @@ def ejecutar_bot_clientes():
         creds = Credentials.from_service_account_file("credentials.json", scopes=SCOPES)
         
     client = gspread.authorize(creds)
-    sheet = client.open("").get_worksheet(0)
+    sheet = client.open("Quinta clientes PEYA").get_worksheet(0)
 
     # --- CONFIGURACIÓN CHROME (MODO NUBE) ---
     chrome_options = Options()
