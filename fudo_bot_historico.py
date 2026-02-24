@@ -19,7 +19,7 @@ def ejecutar_sincronizacion_macro():
         creds = Credentials.from_service_account_file('credentials.json', scopes=scope)
     
     client = gspread.authorize(creds)
-    spreadsheet = client.open("Analisis Fudo")
+    spreadsheet = client.open("Quinta Analisis Fudo")
 
     # 2. CARGAR HOJAS
     try:
@@ -132,3 +132,4 @@ def crear_graficos_bi(spreadsheet, sheet_id, l_dia, l_pago):
 
 if __name__ == "__main__":
     ejecutar_sincronizacion_macro()
+
