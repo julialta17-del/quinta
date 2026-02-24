@@ -17,7 +17,7 @@ def calcular_margen_detallado_big_salads():
         creds = Credentials.from_service_account_file('credentials.json', scopes=scope)
     
     client = gspread.authorize(creds)
-    spreadsheet = client.open("Analisis Fudo")
+    spreadsheet = client.open("Quinta Analisis Fudo")
     sheet_ventas = spreadsheet.worksheet("Hoja 1")
     sheet_costos = spreadsheet.worksheet("Maestro_Costos")
 
@@ -89,3 +89,4 @@ def calcular_margen_detallado_big_salads():
 
 if __name__ == "__main__":
     calcular_margen_detallado_big_salads()
+
