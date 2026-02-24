@@ -85,8 +85,8 @@ def ejecutar_sincronizacion_costos():
             creds = Credentials.from_service_account_file('credentials.json', scopes=scope)
             
         client = gspread.authorize(creds)
-        spreadsheet = client.open("Analisis Fudo")
-        sheet = spreadsheet.worksheet("Maestros_costos")
+        spreadsheet = client.open("Quinta Analisis Fudo")
+        sheet = spreadsheet.worksheet("Maestro_costos")
 
         # Leer el Excel (skiprows si Fudo tiene encabezados extra, usualmente no en productos)
         df = pd.read_excel(ruta_excel)
@@ -110,3 +110,4 @@ def ejecutar_sincronizacion_costos():
 
 if __name__ == "__main__":
     ejecutar_sincronizacion_costos()
+
