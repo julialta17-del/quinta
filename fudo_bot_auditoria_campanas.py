@@ -18,7 +18,7 @@ def auditar_campanas_acumulativo():
         creds = Credentials.from_service_account_file('credentials.json', scopes=scope)
     
     client = gspread.authorize(creds)
-    spreadsheet = client.open("Analisis Fudo")
+    spreadsheet = client.open("Quinta Analisis Fudo")
     
     try:
         sheet_cp = spreadsheet.worksheet("campanas")
