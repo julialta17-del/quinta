@@ -83,7 +83,7 @@ def subir_a_google(consolidado):
         creds = Credentials.from_service_account_file('credentials.json', scopes=scope)
     
     client = gspread.authorize(creds)
-    spreadsheet = client.open("Analisis Fudo")
+    spreadsheet = client.open("Quinta Analisis Fudo")
     sheet_data = spreadsheet.worksheet("Hoja 1")
     
     sheet_data.clear()
