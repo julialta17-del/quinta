@@ -14,7 +14,7 @@ def ejecutar_matriz_estrella():
         creds = Credentials.from_service_account_file('credentials.json', scopes=scope)
     
     client = gspread.authorize(creds)
-    spreadsheet = client.open("Analisis Fudo")
+    spreadsheet = client.open("Quinta Analisis Fudo")
     
     df_hist = pd.DataFrame(spreadsheet.worksheet("Historico").get_all_records())
     df_costos = pd.DataFrame(spreadsheet.worksheet("Maestro_Costos").get_all_records())
@@ -45,3 +45,4 @@ def ejecutar_matriz_estrella():
 
 if __name__ == "__main__":
     ejecutar_matriz_estrella()
+
