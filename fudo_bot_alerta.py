@@ -25,7 +25,7 @@ def ejecutar_alertas():
     creds = Credentials.from_service_account_info(json.loads(creds_json), scopes=scope) if creds_json else Credentials.from_service_account_file('credentials.json', scopes=scope)
     
     client = gspread.authorize(creds)
-    df = pd.DataFrame(client.open("Analisis Fudo").worksheet("Hoja 1").get_all_records())
+    df = pd.DataFrame(client.open("Quinta Analisis Fudo").worksheet("Hoja 1").get_all_records())
     df_reales = df[pd.to_numeric(df['Total'], errors='coerce') > 0].copy()
 
     alertas = ""
@@ -37,3 +37,4 @@ def ejecutar_alertas():
 
 if __name__ == "__main__":
     ejecutar_alertas()
+
