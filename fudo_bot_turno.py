@@ -17,7 +17,7 @@ def ejecutar_analisis_fidelizacion():
         creds = Credentials.from_service_account_file('credentials.json', scopes=scope)
     
     client = gspread.authorize(creds)
-    spreadsheet = client.open("Analisis Fudo")
+    spreadsheet = client.open("Quinta Analisis Fudo")
     
     # LEER HISTORICO
     try:
@@ -111,3 +111,4 @@ def ejecutar_analisis_fidelizacion():
 
 if __name__ == "__main__":
     ejecutar_analisis_fidelizacion()
+
