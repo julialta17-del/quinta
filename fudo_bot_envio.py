@@ -41,7 +41,7 @@ def enviar_reporte_pro(datos):
     mensaje = MIMEMultipart()
     mensaje["From"] = MAIL_REMITENTE
     mensaje["To"] = ", ".join(MAIL_DESTINATARIOS)
-    mensaje["Subject"] = f"🥗 Resumen Ejecutivo Big Salads: {datos['fecha']}"
+    mensaje["Subject"] = f"🥗 Resumen Ejecutivo Big Salads QUINTA: {datos['fecha']}"
 
     # Formateo de moneda para el mail (Estilo Arg)
     venta_f = "{:,.2f}".format(datos['total_v']).replace(',', 'X').replace('.', ',').replace('X', '.')
@@ -100,7 +100,7 @@ def ejecutar():
     creds = Credentials.from_service_account_info(json.loads(creds_json), scopes=scope)
     client = gspread.authorize(creds)
     
-    sheet = client.open("Analisis Fudo").worksheet("Hoja 1")
+    sheet = client.open("Quinta Analisis Fudo").worksheet("Hoja 1")
     # Forzamos lectura como texto para evitar errores de magnitud automáticos
     df = pd.DataFrame(sheet.get_all_records(numericise_ignore=['all']))
     df.columns = df.columns.str.strip()
@@ -142,3 +142,4 @@ def ejecutar():
 
 if __name__ == "__main__":
     ejecutar()
+
