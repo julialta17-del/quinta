@@ -52,7 +52,7 @@ def enviar_reporte_pro(datos):
     <html>
       <body style="font-family: Arial, sans-serif; color: #333;">
         <div style="max-width: 600px; margin: auto; border: 1px solid #ddd; padding: 25px; border-radius: 10px;">
-            <h2 style="color: #2c3e50; text-align: center; border-bottom: 2px solid #27ae60; padding-bottom: 10px;">🥗 Big Salads Sexta</h2>
+            <h2 style="color: #2c3e50; text-align: center; border-bottom: 2px solid #27ae60; padding-bottom: 10px;">🥗 Big Salads Quinta</h2>
             
             <div style="background-color: #f9f9f9; padding: 15px; border-radius: 10px; margin-bottom: 20px;">
                 <p style="font-size: 18px; margin: 5px 0;">💰 <strong>Ventas Totales:</strong> ${venta_f}</p>
@@ -142,4 +142,5 @@ def ejecutar():
 
 if __name__ == "__main__":
     ejecutar()
+
 
