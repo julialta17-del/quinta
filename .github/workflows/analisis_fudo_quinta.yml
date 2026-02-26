@@ -31,10 +31,7 @@ jobs:
           GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
         run: python fudo_bot_costos.py
       
-      - name: Paso 3 - Análisis
-        env:
-          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
-        run: python fudo_bot_analisis.py
+
       - name: Paso 4 - Costo de Venta
         env:
           GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
