@@ -24,7 +24,7 @@ jobs:
       - name: Paso 1 - Descarga de Datos
         env:
           GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
-        run: python fudo_bot_prueba.py
+        run: python fudo_bot_analisis.py
 
       - name: Paso 2 - Descargar costos
         env:
