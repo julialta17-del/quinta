@@ -25,7 +25,7 @@ ruta_excel_final = os.path.join(temp_excel_path, nombre_final)
 os.makedirs(base_path, exist_ok=True)
 os.makedirs(temp_excel_path, exist_ok=True)
 
-# --- CONFIGURACIÓN CHROME (MODO NUBE/HEADLESS) ---
+# --- CONFIGURACIÓN CHROME (MODO NUBE) ---
 chrome_options = Options()
 chrome_options.add_argument('--headless')
 chrome_options.add_argument('--no-sandbox')
@@ -54,29 +54,35 @@ def ejecutar_todo():
         driver.find_element(By.ID, "password").send_keys("BigQuinta22")
         driver.find_element(By.ID, "password").submit()
         
-        # --- FILTRADO DE FECHA (AYER) EN FUDO ---
-        fecha_ayer_dt = datetime.now() - timedelta(days=1)
-        dia_ayer = str(fecha_ayer_dt.day)
-        mes_ayer_idx = str(fecha_ayer_dt.month - 1) 
-
-        print(f"📅 Aplicando filtros en Fudo para el día {dia_ayer}...")
-
-        # Seleccionar Mes
-        select_mes = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "select[ng-model='month']")))
-        Select(select_mes).select_by_value(f"number:{mes_ayer_idx}")
-        time.sleep(4)
-
-        # Seleccionar Día
-        select_dia = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "select[ng-model='day']")))
-        Select(select_dia).select_by_visible_text(dia_ayer)
+        # --- NUEVA LÓGICA: FILTRADO POR RANGO ---
+        print("📅 Configurando filtro por Rango (Ayer a Hoy)...")
         
-        # Espera y Scroll para asegurar carga
-        print("⏳ Sincronizando pedidos...")
-        time.sleep(10) 
-        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-        time.sleep(3)
+        # 1. Cambiar a modo "Rango"
+        select_tipo = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "select[ng-model='type']")))
+        Select(select_tipo).select_by_value("string:r")
+        time.sleep(2)
 
-        # Exportar
+        # 2. Definir fechas
+        ayer = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d') # Formato yyyy-mm-dd para el input date
+        hoy = datetime.now().strftime('%Y-%m-%d')
+
+        # 3. Cargar fecha "Desde" (model.t1)
+        input_desde = driver.find_element(By.CSS_SELECTOR, "input[ng-model='model.t1']")
+        input_desde.clear()
+        input_desde.send_keys(ayer)
+
+        # 4. Cargar fecha "Hasta" (model.t2)
+        input_hasta = driver.find_element(By.CSS_SELECTOR, "input[ng-model='model.t2']")
+        input_hasta.clear()
+        input_hasta.send_keys(hoy)
+        
+        # 5. Forzar actualización (clic en cualquier lado o esperar)
+        print(f"✅ Rango establecido: {ayer} hasta {hoy}")
+        time.sleep(5)
+        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+        time.sleep(2)
+
+        # 6. EXPORTAR
         print("2. Solicitando exportación...")
         exportar_btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "a[ert-download-file='downloadSales()']")))
         driver.execute_script("arguments[0].click();", exportar_btn)
@@ -97,7 +103,7 @@ def ejecutar_todo():
             if os.path.exists(ruta_excel_final): os.remove(ruta_excel_final)
             shutil.move(ruta_extraida, ruta_excel_final)
 
-        # --- PARTE 3: PANDAS (SIN FILTRO DE FECHA) ---
+        # --- PARTE 3: PANDAS (PROCESA TODO EL RANGO) ---
         print("4. Procesando datos con Pandas...")
         df_v = pd.read_excel(ruta_excel_final, sheet_name='Ventas', skiprows=3)
         df_a = pd.read_excel(ruta_excel_final, sheet_name='Adiciones')
@@ -106,18 +112,17 @@ def ejecutar_todo():
 
         df_v.columns = df_v.columns.str.strip()
         
-        # Conversión de Fecha para mostrarla bien en Sheets
+        # Conversión de Fecha
         df_v['Fecha_DT'] = pd.to_datetime(df_v['Creación'], errors='coerce')
         mask_nulos = df_v['Fecha_DT'].isna()
         if mask_nulos.any():
             df_v.loc[mask_nulos, 'Fecha_DT'] = pd.to_datetime(df_v.loc[mask_nulos, 'Creación'], unit='D', origin='1899-12-30', errors='coerce')
         
-        # Guardamos la fecha y hora formateada, pero NO filtramos nada
         df_v['Fecha_Texto'] = df_v['Fecha_DT'].dt.strftime('%d/%m/%Y')
         df_v['Hora_Exacta'] = df_v['Fecha_DT'].dt.strftime('%H:%M')
         df_v['Turno'] = df_v['Fecha_DT'].dt.hour.apply(lambda h: "Mañana" if h < 16 else "Noche")
 
-        # Unir información de las otras solapas
+        # Uniones (Adiciones, Descuentos, Envío)
         prod_resumen = df_a.groupby('Id. Venta')['Producto'].apply(lambda x: ', '.join(x.astype(str))).reset_index()
         prod_resumen.columns = ['Id', 'Detalle_Productos']
         desc_resumen = df_d.groupby('Id. Venta')['Valor'].sum().reset_index()
@@ -125,7 +130,6 @@ def ejecutar_todo():
         envio_resumen = df_e.groupby('Id. Venta')['Valor'].sum().reset_index()
         envio_resumen.columns = ['Id', 'Costo_Envio']
 
-        # Consolidación final (usamos todo lo que vino en el archivo)
         columnas = ['Id', 'Fecha_Texto', 'Hora_Exacta', 'Turno', 'Cliente', 'Total', 'Origen', 'Medio de Pago']
         consolidado = df_v[columnas].merge(prod_resumen, on='Id', how='left')
         consolidado = consolidado.merge(desc_resumen, on='Id', how='left')
@@ -148,11 +152,10 @@ def ejecutar_todo():
         sheet_data = spreadsheet.worksheet("Hoja 1")
         
         sheet_data.clear()
-        # Subimos todo el contenido del DataFrame consolidado
         datos_finales = [consolidado.columns.values.tolist()] + consolidado.fillna("").astype(str).values.tolist()
         sheet_data.update(range_name='A1', values=datos_finales)
         
-        print(f"🚀 ÉXITO: {len(consolidado)} ventas procesadas y subidas.")
+        print(f"🚀 ÉXITO TOTAL: Se subieron {len(consolidado)} pedidos (Rango Ayer-Hoy).")
 
     except Exception as e:
         print(f"❌ Error: {e}")
