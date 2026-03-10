@@ -18,55 +18,69 @@ def ejecutar_sincronizacion_macro():
     client = gspread.authorize(creds)
     spreadsheet = client.open("Quinta Analisis Fudo")
 
-    # 1. LEER HOJA 1 (Tal cual está)
+    # 1. LEER HOJA 1
     try:
         sheet_uno = spreadsheet.worksheet("Hoja 1")
-        # numericise_ignore=['all'] es clave para que Pandas no toque las comas
-        data_uno = pd.DataFrame(sheet_uno.get_all_records(numericise_ignore=['all']))
+        # Traemos todo como texto para que no se borren las comas en el proceso
+        data_completa = pd.DataFrame(sheet_uno.get_all_records(numericise_ignore=['all']))
     except Exception as e:
-        print(f"Error al leer Hoja 1: {e}")
+        print(f"Error al acceder a Hoja 1: {e}")
         return
 
-    if data_uno.empty:
-        print("Hoja 1 vacía.")
+    if data_completa.empty:
+        print("La Hoja 1 ya está vacía.")
         return
 
-    data_uno.columns = [str(c).strip() for c in data_uno.columns]
+    data_completa.columns = [str(c).strip() for c in data_completa.columns]
 
-    # 2. FILTRAR SOLO LO DE HOY
+    # 2. FILTRAR: SEPARAR LO DE HOY DE LO VIEJO
     fecha_hoy_str = datetime.now().strftime('%d/%m/%Y')
-    print(f"Filtrando para dejar solo el día: {fecha_hoy_str}")
-    
-    if 'Fecha_Texto' in data_uno.columns:
-        # Borramos cualquier fila que no sea de hoy
-        data_hoy = data_uno[data_uno['Fecha_Texto'] == fecha_hoy_str].copy()
+    print(f"Buscando pedidos de hoy: {fecha_hoy_str}")
+
+    if 'Fecha_Texto' in data_completa.columns:
+        # Esto es lo que se QUEDA en Hoja 1 y se PASA al Historico
+        solo_hoy = data_completa[data_completa['Fecha_Texto'] == fecha_hoy_str].copy()
     else:
-        print("No se encontró la columna Fecha_Texto.")
+        print("Error: No existe la columna 'Fecha_Texto'.")
         return
 
-    # 3. PREPARAR EL HISTÓRICO
-    try:
-        sheet_hist = spreadsheet.worksheet("Historico")
-    except gspread.exceptions.WorksheetNotFound:
-        sheet_hist = spreadsheet.add_worksheet(title="Historico", rows="50000", cols="30")
+    # 3. LIMPIAR HOJA 1 (Borrar todo y pegar solo lo de hoy)
+    print("Limpiando Hoja 1 (borrando días anteriores)...")
+    sheet_uno.clear()
+    if not solo_hoy.empty:
+        # Convertimos a string para asegurar que la coma (,) no desaparezca
+        datos_hoja1 = [solo_hoy.columns.tolist()] + solo_hoy.fillna("").astype(str).values.tolist()
+        sheet_uno.update(values=datos_hoja1, range_name='A1', value_input_option='RAW')
+        print(f"✅ Hoja 1 limpia: Quedaron {len(solo_hoy)} filas de hoy.")
+    else:
+        print("⚠️ No hay ventas de hoy. La Hoja 1 quedó vacía.")
 
-    # 4. LIMPIEZA Y PEGADO "ESPEJO"
-    print(f"Borrando Historico y pegando {len(data_hoy)} filas nuevas...")
-    sheet_hist.clear() # Borra todo lo anterior
-    
-    # --- EL TRUCO PARA QUE NO SE BORREN LAS COMAS ---
-    # Convertimos absolutamente todo a string y nos aseguramos de que no haya nulos
-    data_hoy = data_hoy.fillna("").astype(str)
-    
-    columnas = data_hoy.columns.tolist()
-    # Convertimos cada celda en un String puro para Google Sheets
-    filas_finales = data_hoy.values.tolist()
-    datos_a_subir = [columnas] + filas_finales
+    # 4. PASAR AL HISTÓRICO (Solo lo de hoy)
+    if not solo_hoy.empty:
+        try:
+            sheet_hist = spreadsheet.worksheet("Historico")
+        except gspread.exceptions.WorksheetNotFound:
+            sheet_hist = spreadsheet.add_worksheet(title="Historico", rows="50000", cols="30")
+            sheet_hist.append_row(solo_hoy.columns.tolist())
 
-    # Usamos RAW para que Google no intente "formatear" el texto a número
-    sheet_hist.update(values=datos_a_subir, range_name='A1', value_input_option='RAW')
-    
-    print(f"✅ Sincronización terminada. Se mantuvo el formato original de Fudo.")
+        # Leemos histórico para no duplicar si el bot corre dos veces
+        data_hist = pd.DataFrame(sheet_hist.get_all_records(numericise_ignore=['all']))
+        
+        # Evitar duplicados por ID
+        solo_hoy['Id_Str'] = solo_hoy['Id'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+        if not data_hist.empty:
+            ids_viejos = data_hist['Id'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip().tolist()
+            nuevos_para_hist = solo_hoy[~solo_hoy['Id_Str'].isin(ids_viejos)].copy()
+        else:
+            nuevos_para_hist = solo_hoy.copy()
+
+        if not nuevos_para_hist.empty:
+            print(f"Pasando {len(nuevos_para_hist)} pedidos nuevos al Historico...")
+            filas_hist = nuevos_para_hist.drop(columns=['Id_Str']).fillna("").astype(str).values.tolist()
+            sheet_hist.append_rows(filas_hist, value_input_option='RAW')
+            print("✅ Sincronización al Historico completada con éxito.")
+        else:
+            print("El Historico ya estaba al día.")
 
 if __name__ == "__main__":
     ejecutar_sincronizacion_macro()
