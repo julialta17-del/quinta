@@ -5,11 +5,12 @@ import shutil
 import pandas as pd
 import gspread
 import json
+from datetime import datetime
 from google.oauth2.service_account import Credentials
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support.ui import WebDriverWait, Select
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
@@ -23,7 +24,7 @@ ruta_excel_final = os.path.join(temp_excel_path, nombre_final)
 os.makedirs(base_path, exist_ok=True)
 os.makedirs(temp_excel_path, exist_ok=True)
 
-# --- CONFIGURACIÓN CHROME ---
+# --- CONFIGURACIÓN CHROME (NUBE) ---
 chrome_options = Options()
 chrome_options.add_argument('--headless')
 chrome_options.add_argument('--no-sandbox')
@@ -43,7 +44,7 @@ def ejecutar_todo():
     wait = WebDriverWait(driver, 45)
 
     try:
-        print("1. Entrando a Fudo...")
+        print("1. Iniciando sesión en Fudo...")
         driver.get("https://app-v2.fu.do/app/#!/sales")
         
         # Login
@@ -51,24 +52,40 @@ def ejecutar_todo():
         driver.find_element(By.ID, "password").send_keys("BigQuinta22")
         driver.find_element(By.ID, "password").submit()
         
-        # ESPERA Y SCROLL (Para que Fudo cargue todos los pedidos del día en pantalla)
-        print("⏳ Cargando pedidos en pantalla...")
+        # --- FILTRADO POR DÍA ACTUAL ---
+        fecha_hoy = datetime.now()
+        dia_hoy = str(fecha_hoy.day)
+        # Fudo usa índice 0 para meses (Enero=0, Marzo=2)
+        mes_hoy_idx = str(fecha_hoy.month - 1) 
+
+        print(f"📅 Seleccionando fecha de hoy: {dia_hoy}/{fecha_hoy.month}...")
+        
+        # Seleccionar Mes
+        sel_mes = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "select[ng-model='month']")))
+        Select(sel_mes).select_by_value(f"number:{mes_hoy_idx}")
+        time.sleep(2)
+        
+        # Seleccionar Día
+        sel_dia = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "select[ng-model='day']")))
+        Select(sel_dia).select_by_visible_text(dia_hoy)
+        
+        print("⏳ Esperando que carguen los pedidos...")
         time.sleep(15) 
         driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
         time.sleep(3)
 
-        # EXPORTAR (Lo que esté en pantalla en ese momento)
-        print("2. Exportando...")
+        # 2. EXPORTAR
+        print("2. Solicitando exportación...")
         exportar_btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "a[ert-download-file='downloadSales()']")))
         driver.execute_script("arguments[0].click();", exportar_btn)
         
-        print("📥 Descargando...")
-        time.sleep(30) 
+        print("📥 Descargando archivo...")
+        time.sleep(35) 
 
         # --- EXTRACCIÓN ---
         archivos_zip = [os.path.join(base_path, f) for f in os.listdir(base_path) if f.lower().endswith(".zip")]
         if not archivos_zip:
-            raise Exception("No se descargó nada. ¿Hay ventas hoy?")
+            raise Exception("No se encontró el ZIP descargado. Verificá si hay ventas hoy.")
         
         zip_file = max(archivos_zip, key=os.path.getctime)
         with zipfile.ZipFile(zip_file, 'r') as zip_ref:
@@ -78,14 +95,14 @@ def ejecutar_todo():
             if os.path.exists(ruta_excel_final): os.remove(ruta_excel_final)
             shutil.move(ruta_extraida, ruta_excel_final)
 
-        # --- PROCESAMIENTO PANDAS (SUBE TODO LO QUE BAJÓ) ---
-        print("4. Procesando con Pandas...")
+        # --- PROCESAMIENTO PANDAS ---
+        print("4. Procesando datos con Pandas...")
         df_v = pd.read_excel(ruta_excel_final, sheet_name='Ventas', skiprows=3)
         df_a = pd.read_excel(ruta_excel_final, sheet_name='Adiciones')
         
         df_v.columns = df_v.columns.str.strip()
         
-        # Fechas (Solo para formatear, no filtramos nada)
+        # Formato de fechas
         df_v['Fecha_DT'] = pd.to_datetime(df_v['Creación'], errors='coerce')
         mask = df_v['Fecha_DT'].isna()
         if mask.any():
@@ -117,7 +134,7 @@ def ejecutar_todo():
         datos_finales = [consolidado.columns.values.tolist()] + consolidado.fillna("").astype(str).values.tolist()
         sheet_data.update(range_name='A1', values=datos_finales)
         
-        print(f"🚀 ÉXITO: {len(consolidado)} pedidos procesados.")
+        print(f"🚀 ÉXITO: {len(consolidado)} ventas del día subidas.")
 
     except Exception as e:
         print(f"❌ Error: {e}")
