@@ -5,7 +5,6 @@ import shutil
 import pandas as pd
 import gspread
 import json
-import numpy as np
 from datetime import datetime, timedelta
 from google.oauth2.service_account import Credentials
 from selenium import webdriver
@@ -16,7 +15,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 
-# --- CONFIGURACIÓN ---
+# --- CONFIGURACIÓN DE RUTAS ---
 base_path = os.path.join(os.getcwd(), "descargas")
 temp_excel_path = os.path.join(base_path, "temp_excel")
 nombre_final = "ventas.xls"
@@ -25,6 +24,7 @@ ruta_excel_final = os.path.join(temp_excel_path, nombre_final)
 os.makedirs(base_path, exist_ok=True)
 os.makedirs(temp_excel_path, exist_ok=True)
 
+# --- CONFIGURACIÓN CHROME (NUBE) ---
 chrome_options = Options()
 chrome_options.add_argument('--headless')
 chrome_options.add_argument('--no-sandbox')
@@ -41,58 +41,55 @@ chrome_options.add_experimental_option("prefs", {
 def ejecutar_todo():
     service = Service(ChromeDriverManager().install())
     driver = webdriver.Chrome(service=service, options=chrome_options)
-    wait = WebDriverWait(driver, 40)
+    wait = WebDriverWait(driver, 45)
 
     try:
         print("1. Iniciando sesión en Fudo...")
         driver.get("https://app-v2.fu.do/app/#!/sales")
         
+        # Login
         wait.until(EC.presence_of_element_located((By.ID, "user"))).send_keys("gestion@bigsaladsquinta")
         driver.find_element(By.ID, "password").send_keys("BigQuinta22")
         driver.find_element(By.ID, "password").submit()
         
-        # --- FILTRADO POR RANGO (INYECCIÓN JS) ---
-        print("📅 Forzando Rango Ayer-Hoy vía JavaScript...")
+        # --- EL CAMBIO CLAVE: REFRESH ---
+        print("🔄 Actualizando página para limpiar sesión...")
+        time.sleep(5) 
+        driver.refresh()
+        time.sleep(8) # Espera a que cargue todo tras el refresh
+
+        # --- FILTRADO POR DÍA ANTERIOR (AYER) ---
+        fecha_ayer = datetime.now() - timedelta(days=1)
+        dia_ayer = str(fecha_ayer.day)
+        mes_ayer_idx = str(fecha_ayer.month - 1) 
+
+        print(f"📅 Seleccionando fecha de AYER: {dia_ayer}/{fecha_ayer.month}...")
         
-        # 1. Cambiar a modo Rango
-        select_tipo = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "select[ng-model='type']")))
-        Select(select_tipo).select_by_value("string:r")
+        # Seleccionar Mes
+        sel_mes = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "select[ng-model='month']")))
+        Select(sel_mes).select_by_value(f"number:{mes_ayer_idx}")
+        time.sleep(4)
+        
+        # Seleccionar Día
+        sel_dia = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "select[ng-model='day']")))
+        Select(sel_dia).select_by_visible_text(dia_ayer)
+        
+        print("⏳ Esperando carga completa y haciendo scroll...")
+        time.sleep(12) 
+        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
         time.sleep(3)
 
-        # 2. Fechas en formato ISO (YYYY-MM-DD)
-        ayer = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
-        hoy = datetime.now().strftime('%Y-%m-%d')
-
-        # 3. Inyectamos los valores directamente en el modelo de Angular de Fudo
-        # Esto salta la necesidad de usar el teclado
-        script_js = f"""
-            var scope = angular.element(document.querySelector('select[ng-model="type"]')).scope();
-            scope.model.t1 = new Date('{ayer}T00:00:00');
-            scope.model.t2 = new Date('{hoy}T23:59:59');
-            scope.refreshDate();
-            scope.$apply();
-        """
-        driver.execute_script(script_js)
-        
-        print(f"✅ Rango inyectado: {ayer} a {hoy}. Esperando carga...")
-        time.sleep(12) 
-        
-        # Scroll para despertar la tabla
-        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-        time.sleep(2)
-
-        # 4. EXPORTAR
+        # 2. EXPORTAR
         print("2. Solicitando exportación...")
         exportar_btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "a[ert-download-file='downloadSales()']")))
         driver.execute_script("arguments[0].click();", exportar_btn)
         
-        print("📥 Descargando archivo...")
         time.sleep(35) 
 
-        # --- PARTE 2: PROCESAMIENTO ---
+        # --- EXTRACCIÓN ---
         archivos_zip = [os.path.join(base_path, f) for f in os.listdir(base_path) if f.lower().endswith(".zip")]
         if not archivos_zip:
-            raise Exception("No se descargó el archivo. Fudo no procesó el rango.")
+            raise Exception("No se encontró el ZIP.")
         
         zip_file = max(archivos_zip, key=os.path.getctime)
         with zipfile.ZipFile(zip_file, 'r') as zip_ref:
@@ -102,11 +99,12 @@ def ejecutar_todo():
             if os.path.exists(ruta_excel_final): os.remove(ruta_excel_final)
             shutil.move(ruta_extraida, ruta_excel_final)
 
-        print("4. Procesando datos con Pandas...")
+        # --- PROCESAMIENTO PANDAS ---
+        print("4. Procesando con Pandas...")
         df_v = pd.read_excel(ruta_excel_final, sheet_name='Ventas', skiprows=3)
-        df_v.columns = df_v.columns.str.strip()
+        df_a = pd.read_excel(ruta_excel_final, sheet_name='Adiciones')
         
-        # Conversión de Fecha
+        df_v.columns = df_v.columns.str.strip()
         df_v['Fecha_DT'] = pd.to_datetime(df_v['Creación'], errors='coerce')
         mask = df_v['Fecha_DT'].isna()
         if mask.any():
@@ -116,24 +114,30 @@ def ejecutar_todo():
         df_v['Hora_Exacta'] = df_v['Fecha_DT'].dt.strftime('%H:%M')
         df_v['Turno'] = df_v['Fecha_DT'].dt.hour.apply(lambda h: "Mañana" if h < 16 else "Noche")
 
-        # --- SUBIR A GOOGLE SHEETS ---
-        print(f"6. Subiendo {len(df_v)} ventas...")
-        scope_gs = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+        # Detalle de Productos
+        prod_resumen = df_a.groupby('Id. Venta')['Producto'].apply(lambda x: ', '.join(x.astype(str))).reset_index()
+        prod_resumen.columns = ['Id', 'Detalle_Productos']
+
+        columnas_finales = ['Id', 'Fecha_Texto', 'Hora_Exacta', 'Turno', 'Cliente', 'Total', 'Origen', 'Medio de Pago']
+        consolidado = df_v[columnas_finales].merge(prod_resumen, on='Id', how='left')
+        consolidado['Detalle_Productos'] = consolidado['Detalle_Productos'].fillna("Sin detalle")
+
+        # --- SUBIR A HOJA 1 (SIN PERDER COMAS) ---
+        print("6. Subiendo a Hoja 1...")
+        scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
         creds_json = os.getenv("GOOGLE_CREDENTIALS")
-        creds = Credentials.from_service_account_info(json.loads(creds_json), scopes=scope_gs) if creds_json else Credentials.from_service_account_file('credentials.json', scopes=scope_gs)
+        creds = Credentials.from_service_account_info(json.loads(creds_json), scopes=scope) if creds_json else Credentials.from_service_account_file('credentials.json', scopes=scope)
         
         client = gspread.authorize(creds)
         spreadsheet = client.open("Quinta Analisis Fudo")
         sheet_data = spreadsheet.worksheet("Hoja 1")
         
         sheet_data.clear()
-        # Solo subimos las columnas que te interesan para no romper el histórico
-        columnas_finales = ['Id', 'Fecha_Texto', 'Hora_Exacta', 'Turno', 'Cliente', 'Total', 'Origen', 'Medio de Pago']
-        # Si faltan datos de adiciones/descuentos en esta vuelta, procesamos solo lo principal
-        datos_finales = [columnas_finales] + df_v[columnas_finales].fillna("").astype(str).values.tolist()
-        sheet_data.update(range_name='A1', values=datos_finales)
+        # Convertimos todo a STRING y subimos con RAW para que Google respete las comas (,)
+        datos_finales = [consolidado.columns.values.tolist()] + consolidado.fillna("").astype(str).values.tolist()
+        sheet_data.update(values=datos_finales, range_name='A1', value_input_option='RAW')
         
-        print(f"🚀 ÉXITO: {len(df_v)} pedidos subidos.")
+        print("🚀 ÉXITO: Hoja 1 actualizada con refresh previo.")
 
     except Exception as e:
         print(f"❌ Error: {e}")
