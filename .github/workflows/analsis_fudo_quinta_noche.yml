@@ -57,10 +57,7 @@ jobs:
         env:
           GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
         run: python fudo_bot_limpiodatos_antes_del_alerta.py
-      - name: Paso 9 - Alerta
-        env:
-          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
-        run: python fudo_bot_alerta.py
+
       
       - name: Paso 10 - Envio
         env:
