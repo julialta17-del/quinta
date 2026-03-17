@@ -22,7 +22,7 @@ from webdriver_manager.chrome import ChromeDriverManager
 tz_arg = pytz.timezone("America/Argentina/Buenos_Aires")
 ahora_arg = datetime.now(tz_arg)
 fecha_desde = ahora_arg.strftime("%Y-%m-%d")
-fecha_hoy_texto = ahora_arg.strftime("%d/%m/%Y")  # Para filtrar en pandas
+fecha_hoy_texto = ahora_arg.strftime("%d/%m/%Y")
 
 if ahora_arg.hour >= 21:
     fecha_hasta = (ahora_arg + timedelta(days=1)).strftime("%Y-%m-%d")
@@ -36,7 +36,7 @@ else:
 # -------------------------------------------------------
 # RUTAS
 # -------------------------------------------------------
-base_path = os.path.join(os.getcwd(), "descargas")
+base_path = os.path.abspath(os.path.join(os.getcwd(), "descargas"))
 temp_excel_path = os.path.join(base_path, "temp_excel")
 nombre_final = "ventas.xls"
 ruta_excel_final = os.path.join(temp_excel_path, nombre_final)
@@ -47,7 +47,7 @@ os.makedirs(temp_excel_path, exist_ok=True)
 # CHROME HEADLESS
 # -------------------------------------------------------
 chrome_options = Options()
-chrome_options.add_argument('--headless=new')        # Fix: versión nueva
+chrome_options.add_argument('--headless=new')
 chrome_options.add_argument('--no-sandbox')
 chrome_options.add_argument('--disable-dev-shm-usage')
 chrome_options.add_argument('--disable-gpu')
@@ -60,17 +60,17 @@ chrome_options.add_experimental_option("prefs", {
 
 
 def esperar_descarga(carpeta, timeout=90):
-    """Espera hasta que aparezca un ZIP completo (sin .crdownload)"""
     print("Esperando que termine la descarga...")
     fin = time.time() + timeout
     while time.time() < fin:
         archivos = os.listdir(carpeta)
+        print(f"  Archivos en carpeta: {archivos}")  # debug
         zips = [f for f in archivos if f.lower().endswith(".zip")]
         en_curso = [f for f in archivos if f.endswith(".crdownload")]
         if zips and not en_curso:
             print(f"Descarga completa: {zips[0]}")
             return True
-        time.sleep(2)
+        time.sleep(5)
     return False
 
 
@@ -78,7 +78,7 @@ def ejecutar_todo():
     service = Service(ChromeDriverManager().install())
     driver = webdriver.Chrome(service=service, options=chrome_options)
 
-    # Fix crítico: habilitar descargas en headless vía CDP
+    # Fix crítico: ruta absoluta para que Chrome sepa dónde descargar
     driver.execute_cdp_cmd("Page.setDownloadBehavior", {
         "behavior": "allow",
         "downloadPath": base_path
@@ -92,7 +92,6 @@ def ejecutar_todo():
         # -------------------------------------------------------
         print("1. Iniciando sesión en Fudo...")
         driver.get("https://app-v2.fu.do/app/#!/sales")
-
         wait.until(EC.presence_of_element_located((By.ID, "user"))).send_keys(os.environ["FUDO_USER"])
         driver.find_element(By.ID, "password").send_keys(os.environ["FUDO_PASS"])
         driver.find_element(By.ID, "password").submit()
@@ -126,33 +125,36 @@ def ejecutar_todo():
                 scope.refreshDate();
             });
         """, fecha_desde, fecha_hasta, hora_hasta)
-        time.sleep(1)
+        time.sleep(3)  # Angular necesita tiempo para aplicar el filtro
 
         # -------------------------------------------------------
-        # PARTE 3: EXPORTAR Y ESPERAR DESCARGA
+        # PARTE 3: EXPORTAR
         # -------------------------------------------------------
-print("4. Solicitando exportación...")
-exportar_btn = wait.until(EC.element_to_be_clickable(
-    (By.CSS_SELECTOR, "a[ert-download-file='downloadSales()']")
-))
+        print("4. Solicitando exportación...")
+        exportar_btn = wait.until(EC.element_to_be_clickable(
+            (By.CSS_SELECTOR, "a[ert-download-file='downloadSales()']")
+        ))
 
-# Cerrar el iframe de Userpilot si existe
-try:
-    driver.execute_script("""
-        var iframe = document.getElementById('userpilotIframeContainer');
-        if (iframe) iframe.remove();
-    """)
-    time.sleep(1)
-    print("Modal de Userpilot cerrado.")
-except:
-    pass
+        # Cerrar el iframe de Userpilot/onboarding si existe
+        try:
+            driver.execute_script("""
+                var iframe = document.getElementById('userpilotIframeContainer');
+                if (iframe) iframe.remove();
+            """)
+            time.sleep(1)
+            print("Modal de Userpilot cerrado.")
+        except Exception:
+            pass
 
-# Click vía JavaScript para ignorar cualquier elemento encima
-driver.execute_script("arguments[0].click();", exportar_btn)
+        # Click directo vía JS para ignorar cualquier overlay
+        driver.execute_script("arguments[0].click();", exportar_btn)
 
         # -------------------------------------------------------
-        # PARTE 4: EXTRAER ZIP
+        # PARTE 4: ESPERAR Y EXTRAER ZIP
         # -------------------------------------------------------
+        if not esperar_descarga(base_path, timeout=90):
+            raise Exception("Timeout: la descarga no se completó en 90 segundos")
+
         archivos_zip = [
             os.path.join(base_path, f)
             for f in os.listdir(base_path)
@@ -161,7 +163,7 @@ driver.execute_script("arguments[0].click();", exportar_btn)
         if not archivos_zip:
             raise Exception("No se encontró el archivo ZIP descargado.")
 
-        zip_file = max(archivos_zip, key=os.path.getmtime)  # getmtime = compatible Linux
+        zip_file = max(archivos_zip, key=os.path.getmtime)
         print(f"5. Extrayendo: {zip_file}")
 
         with zipfile.ZipFile(zip_file, 'r') as zip_ref:
@@ -217,8 +219,6 @@ driver.execute_script("arguments[0].click();", exportar_btn)
         consolidado[['Descuento_Total', 'Costo_Envio']] = consolidado[['Descuento_Total', 'Costo_Envio']].fillna(0)
         consolidado['Detalle_Productos'] = consolidado['Detalle_Productos'].fillna("Sin detalle")
 
-        # Filtrar solo hoy en zona Argentina
-        # (el rango nocturno trae datos del día siguiente pero los filtramos acá)
         print(f"7. Filtrando datos de HOY: {fecha_hoy_texto}")
         consolidado = consolidado[consolidado['Fecha_Texto'] == fecha_hoy_texto].copy()
 
@@ -235,7 +235,6 @@ driver.execute_script("arguments[0].click();", exportar_btn)
             "https://www.googleapis.com/auth/drive"
         ]
         creds_json = os.environ.get("GOOGLE_CREDENTIALS")
-
         if creds_json:
             creds = Credentials.from_service_account_info(json.loads(creds_json), scopes=scope)
         else:
