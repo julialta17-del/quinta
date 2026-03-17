@@ -131,14 +131,24 @@ def ejecutar_todo():
         # -------------------------------------------------------
         # PARTE 3: EXPORTAR Y ESPERAR DESCARGA
         # -------------------------------------------------------
-        print("4. Solicitando exportación...")
-        exportar_btn = wait.until(EC.element_to_be_clickable(
-            (By.CSS_SELECTOR, "a[ert-download-file='downloadSales()']")
-        ))
-        exportar_btn.click()
+print("4. Solicitando exportación...")
+exportar_btn = wait.until(EC.element_to_be_clickable(
+    (By.CSS_SELECTOR, "a[ert-download-file='downloadSales()']")
+))
 
-        if not esperar_descarga(base_path, timeout=90):
-            raise Exception("Timeout: la descarga no se completó en 90 segundos")
+# Cerrar el iframe de Userpilot si existe
+try:
+    driver.execute_script("""
+        var iframe = document.getElementById('userpilotIframeContainer');
+        if (iframe) iframe.remove();
+    """)
+    time.sleep(1)
+    print("Modal de Userpilot cerrado.")
+except:
+    pass
+
+# Click vía JavaScript para ignorar cualquier elemento encima
+driver.execute_script("arguments[0].click();", exportar_btn)
 
         # -------------------------------------------------------
         # PARTE 4: EXTRAER ZIP
