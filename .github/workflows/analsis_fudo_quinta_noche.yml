@@ -23,6 +23,8 @@ jobs:
 
       - name: Paso 1 - Descarga de Datos
         env:
+          FUDO_USER: ${{ secrets.FUDO_USER }}
+          FUDO_PASS: ${{ secrets.FUDO_PASS }}
           GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
         run: python analisis_noche.py
 
