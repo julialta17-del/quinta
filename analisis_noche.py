@@ -92,8 +92,9 @@ def ejecutar_todo():
         # -------------------------------------------------------
         print("1. Iniciando sesión en Fudo...")
         driver.get("https://app-v2.fu.do/app/#!/sales")
-        wait.until(EC.presence_of_element_located((By.ID, "user"))).send_keys(os.environ[FUDO_USER])
-        driver.find_element(By.ID, "password").send_keys(os.environ[FUDO_PASS])
+
+        wait.until(EC.presence_of_element_located((By.ID, "user"))).send_keys(os.environ["FUDO_USER"])
+        driver.find_element(By.ID, "password").send_keys(os.environ["FUDO_PASS"])
         driver.find_element(By.ID, "password").submit()
 
         # -------------------------------------------------------
