@@ -13,7 +13,6 @@ def calcular_margen_detallado_big_salads():
         "https://www.googleapis.com/auth/drive"
     ]
 
-    # Credenciales desde GitHub Secret o archivo local
     creds_json = os.environ.get("GOOGLE_CREDENTIALS")
     if creds_json:
         creds = Credentials.from_service_account_info(json.loads(creds_json), scopes=scope)
@@ -55,23 +54,23 @@ def calcular_margen_detallado_big_salads():
     df_ventas['Costo_Total_Venta'] = df_ventas['Detalle_Productos'].apply(calcular_costo_acumulado)
 
     def procesar_finanzas(fila):
-        venta      = pd.to_numeric(fila.get('Total', 0), errors='coerce') or 0
-        envio      = pd.to_numeric(fila.get('Costo_Envio', 0), errors='coerce') or 0
-        descuento  = pd.to_numeric(fila.get('Descuento_Total', 0), errors='coerce') or 0
+        venta         = pd.to_numeric(fila.get('Total', 0), errors='coerce') or 0
+        envio         = pd.to_numeric(fila.get('Costo_Envio', 0), errors='coerce') or 0
+        descuento     = pd.to_numeric(fila.get('Descuento_Total', 0), errors='coerce') or 0
         costo_insumos = fila.get('Costo_Total_Venta', 0)
 
-        origen_raw = str(fila.get('Origen', '')).lower().strip()
+        origen_raw       = str(fila.get('Origen', '')).lower().strip()
         origen_sin_tilde = origen_raw.replace('é', 'e').replace('ú', 'u')
 
-        comision_peya = 0
+        comision_peya   = 0
         comision_online = 0
 
         if "pedidos ya" in origen_sin_tilde:
-            comision_peya = round(venta * 0.30, 2)
+            comision_peya = round(venta * 0.30)
         elif "menu online" in origen_sin_tilde:
-            comision_online = round((venta + envio + descuento) * 0.023, 2)
+            comision_online = round((venta + envio + descuento) * 0.023)
 
-        margen = round(venta - costo_insumos - comision_peya - comision_online, 2)
+        margen = round(venta - costo_insumos - comision_peya - comision_online)
 
         return pd.Series([comision_peya, comision_online, margen])
 
@@ -80,8 +79,12 @@ def calcular_margen_detallado_big_salads():
         df_ventas.apply(procesar_finanzas, axis=1)
 
     df_ventas['Margen_Neto_%'] = np.where(
-        df_ventas['Total'] > 0,
-        ((df_ventas['Margen_Neto_$'] / df_ventas['Total']) * 100).round(1),
+        df_ventas['Total'].astype(str).str.replace(',', '.').pipe(pd.to_numeric, errors='coerce').fillna(0) > 0,
+        (
+            df_ventas['Margen_Neto_$'] /
+            df_ventas['Total'].astype(str).str.replace(',', '.').pipe(pd.to_numeric, errors='coerce').fillna(1)
+            * 100
+        ).round(1),
         0
     )
 
@@ -89,6 +92,7 @@ def calcular_margen_detallado_big_salads():
     # 5. REORDENAMIENTO FINAL
     # -------------------------------------------------------
     columnas_al_final = [
+        'Costo_Total_Venta',
         'Margen_Neto_$',
         'Margen_Neto_%',
         'Comision_PeYa_$',
@@ -98,10 +102,41 @@ def calcular_margen_detallado_big_salads():
     df_final = df_ventas[columnas_principales + columnas_al_final].copy()
 
     # -------------------------------------------------------
-    # 6. SUBIR A GOOGLE SHEETS
+    # 6. LIMPIEZA DE DECIMALES
+    # -------------------------------------------------------
+    df_final = df_final.replace([np.nan, np.inf, -np.inf], 0)
+
+    # Estas columnas van como entero puro, sin .0
+    cols_enteras = [
+        'Costo_Total_Venta',
+        'Comision_PeYa_$',
+        'Comision_Tienda_Online_$',
+        'Margen_Neto_$'
+    ]
+    for col in cols_enteras:
+        if col in df_final.columns:
+            df_final[col] = (
+                pd.to_numeric(df_final[col], errors='coerce')
+                .fillna(0)
+                .round(0)
+                .astype(int)
+                .astype(str)
+            )
+
+    # Margen_Neto_%: si termina en .0 lo muestra entero, si tiene decimal real lo conserva
+    if 'Margen_Neto_%' in df_final.columns:
+        def formatear_pct(x):
+            val = pd.to_numeric(x, errors='coerce')
+            if pd.isna(val):
+                return '0'
+            val = round(val, 1)
+            return str(int(val)) if val == int(val) else str(val)
+        df_final['Margen_Neto_%'] = df_final['Margen_Neto_%'].apply(formatear_pct)
+
+    # -------------------------------------------------------
+    # 7. SUBIR A GOOGLE SHEETS
     # -------------------------------------------------------
     print("5. Actualizando Hoja 1 con las nuevas comisiones...")
-    df_final = df_final.replace([np.nan, np.inf, -np.inf], 0)
     datos_subir = [df_final.columns.tolist()] + df_final.astype(str).values.tolist()
 
     sheet_ventas.clear()
