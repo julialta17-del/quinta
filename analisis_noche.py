@@ -41,7 +41,7 @@ def subir_a_google(consolidado):
     client = gspread.authorize(creds)
     
     try:
-        spreadsheet = client.open("Analisis Fudo")
+        spreadsheet = client.open("Quinta Analisis Fudo")
         sheet_data = spreadsheet.worksheet("Hoja 1")
         
         print("🧹 Limpiando Hoja 1...")
@@ -75,8 +75,8 @@ try:
     driver.get("https://app-v2.fu.do/app/#!/sales")
     
     # Login
-    wait.until(EC.presence_of_element_located((By.ID, "user"))).send_keys("admin@bigsaladssexta")
-    driver.find_element(By.ID, "password").send_keys("bigsexta")
+    wait.until(EC.presence_of_element_located((By.ID, "user"))).send_keys("gestion@bigsaladsquinta")
+    driver.find_element(By.ID, "password").send_keys("BigQuinta22")
     driver.find_element(By.ID, "password").submit()
 
     print(f"Esperando carga y aplicando rango: {fecha_inicio} a {fecha_fin}")
