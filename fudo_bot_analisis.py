@@ -72,7 +72,7 @@ try:
     print("--- PASO: DESCARGA FUDO ---")
     driver.get("https://app-v2.fu.do/app/#!/sales")
 
-    wait.until(EC.presence_of_element_located((By.ID, "user"))).send_keys("gestion@bigsaladsquinta")
+    wait.until(EC.presence_of_element_located((By.ID, "user"))).send_keys("FUDO_USER")
     driver.find_element(By.ID, "password").send_keys("BigQuinta22")
     driver.find_element(By.ID, "password").submit()
 
