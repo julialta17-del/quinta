@@ -47,7 +47,7 @@ def ejecutar_sincronizacion_costos():
         user_input = wait.until(EC.presence_of_element_located((By.ID, "user")))
         pass_input = driver.find_element(By.ID, "password")
         
-        user_input.send_keys("gestion@bigsaladsquinta")
+        user_input.send_keys("FUDO_USER")
         pass_input.send_keys("BigQuinta22")
         pass_input.submit()
         
