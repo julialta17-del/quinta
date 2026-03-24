@@ -32,10 +32,14 @@ jobs:
         env:
 
           GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+          FUDO_USER: ${{ secrets.FUDO_USER }}
+          FUDO_PASS: ${{ secrets.FUDO_PASS }}
         run: python fudo_bot_pegar.py
 
       - name: Paso 2 - Descargar costos
         env:
+          FUDO_USER: ${{ secrets.FUDO_USER }}
+          FUDO_PASS: ${{ secrets.FUDO_PASS }}
           GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
         run: python fudo_bot_costos.py
       
