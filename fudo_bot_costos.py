@@ -48,7 +48,7 @@ def ejecutar_sincronizacion_costos():
         pass_input = driver.find_element(By.ID, "password")
         
         user_input.send_keys("gestion@bigsaladsquinta")
-        pass_input.send_keys("FUDO_PASS")
+        pass_input.send_keys("BigQuinta22")
         pass_input.submit()
         
         print("Descargando archivo ZIP...")
