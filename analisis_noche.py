@@ -76,7 +76,7 @@ try:
     
     # Login
     wait.until(EC.presence_of_element_located((By.ID, "user"))).send_keys("gestion@bigsaladsquinta")
-    driver.find_element(By.ID, "password").send_keys("BigQuinta22")
+    driver.find_element(By.ID, "password").send_keys("FUDO_PASS")
     driver.find_element(By.ID, "password").submit()
 
     print(f"Esperando carga y aplicando rango: {fecha_inicio} a {fecha_fin}")
