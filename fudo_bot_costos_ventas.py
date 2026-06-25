@@ -6,6 +6,33 @@ import json
 import numpy as np
 
 
+def parsear_numero_ar(s):
+    """
+    Convierte un string con formato argentino a entero redondeado.
+    '4.712,67' → 4713  |  '4712,67' → 4713  |  '4712' → 4712
+    """
+    if isinstance(s, (int, float)):
+        return round(float(s))
+    s = str(s).strip()
+    if not s or s.lower() in ('nan', ''):
+        return 0
+    # Tiene punto Y coma → punto=miles, coma=decimal
+    if '.' in s and ',' in s:
+        s = s.replace('.', '').replace(',', '.')
+    # Solo coma → es decimal
+    elif ',' in s:
+        s = s.replace(',', '.')
+    # Solo punto con exactamente 3 dígitos después → separador de miles ("4.712")
+    elif '.' in s:
+        partes = s.split('.')
+        if len(partes) == 2 and len(partes[1]) == 3:
+            s = s.replace('.', '')
+    try:
+        return round(float(s))
+    except ValueError:
+        return 0
+
+
 def calcular_margen_detallado_big_salads():
     print("1. Conectando a Google Sheets...")
     scope = [
@@ -29,8 +56,27 @@ def calcular_margen_detallado_big_salads():
     # 2. PROCESAR COSTOS
     # -------------------------------------------------------
     print("2. Leyendo costos...")
-    df_costos = pd.DataFrame(sheet_costos.get_all_records())
-    dict_costos = pd.Series(df_costos['Costo'].values, index=df_costos['Nombre']).to_dict()
+
+    # ✅ CLAVE: get_all_values() trae los strings TAL COMO los muestra Sheets
+    # get_all_records() convierte "4.712,67" → 471267 (entero), perdiendo decimales
+    raw = sheet_costos.get_all_values()
+    encabezados = raw[0]
+    idx_nombre = encabezados.index('Nombre')
+    idx_costo  = encabezados.index('Costo')
+
+    dict_costos = {}
+    for fila in raw[1:]:
+        if len(fila) <= max(idx_nombre, idx_costo):
+            continue
+        nombre = fila[idx_nombre].strip()
+        costo  = parsear_numero_ar(fila[idx_costo])
+        if nombre:
+            dict_costos[nombre.lower()] = costo
+
+    print(f"   Productos en Maestro_Costos: {len(dict_costos)}")
+    print("   Muestra de claves del diccionario:")
+    for k, v in list(dict_costos.items())[:5]:
+        print(f"     '{k}' → {v}")
 
     # -------------------------------------------------------
     # 3. LEER VENTAS
@@ -43,21 +89,91 @@ def calcular_margen_detallado_big_salads():
         return
 
     # -------------------------------------------------------
-    # 4. CÁLCULOS
+    # 4. DEBUG
     # -------------------------------------------------------
-    def calcular_costo_acumulado(celda_productos):
-        if not celda_productos or str(celda_productos).lower() == 'nan':
-            return 0
+    print("\n--- DEBUG Detalle_Productos (primeras 5 filas) ---")
+    no_encontrados = set()
+
+    for i, fila in df_ventas.head(5).iterrows():
+        celda = str(fila.get('Detalle_Productos', ''))
+        print(f"  Fila {i}: repr={repr(celda)}")
+        for item in celda.split(','):
+            key = item.strip().lower()
+            costo_debug = dict_costos.get(key, 'NO ENCONTRADO')
+            print(f"    → '{item.strip()}' → costo={costo_debug}")
+
+    print("--- FIN DEBUG ---\n")
+
+    # -------------------------------------------------------
+    # 5. COSTO DE INSUMOS POR PEDIDO
+    # -------------------------------------------------------
+    def calcular_costo_acumulado(fila):
+        celda_productos = fila.get('Detalle_Productos', '')
+        venta = parsear_numero_ar(fila.get('Total', 0))
+
+        if not celda_productos or str(celda_productos).strip().lower() in ('', 'nan'):
+            return round(venta * 0.35)
+
         lista_items = [item.strip() for item in str(celda_productos).split(',')]
-        return sum(dict_costos.get(producto, 0) for producto in lista_items)
 
-    df_ventas['Costo_Total_Venta'] = df_ventas['Detalle_Productos'].apply(calcular_costo_acumulado)
+        costo = 0
+        alguno_no_encontrado = False
 
+        for producto in lista_items:
+            key = producto.strip().lower()
+            if key not in dict_costos:
+                no_encontrados.add(producto.strip())
+                alguno_no_encontrado = True
+            else:
+                costo += dict_costos[key]
+
+        # Fallback SOLO si ningún producto fue encontrado en el maestro
+        if alguno_no_encontrado and costo == 0:
+            return round(venta * 0.35)
+
+        return round(costo)
+
+    df_ventas['Costo_Total_Venta'] = df_ventas.apply(calcular_costo_acumulado, axis=1)
+
+    if no_encontrados:
+        print(f"⚠️  Productos en ventas SIN costo en Maestro_Costos ({len(no_encontrados)}):")
+        for p in sorted(no_encontrados):
+            print(f"     '{p}'")
+        print("   → Para esos pedidos se usó el 35% de la venta como estimado.")
+    else:
+        print("✅ Todos los productos encontrados en Maestro_Costos.")
+
+    # -------------------------------------------------------
+    # 6. COSTO DE MANO DE OBRA POR PEDIDO
+    # -------------------------------------------------------
+    print("4. Calculando costo de mano de obra por pedido...")
+
+    COSTO_TURNO = 3600 * 2 * 4  # $28.800 por turno completo (2 empleados)
+
+    df_ventas['_fecha_turno'] = (
+        df_ventas['Fecha_Texto'].astype(str).str.strip() + " | " +
+        df_ventas['Turno'].astype(str).str.strip()
+    )
+
+    pedidos_por_turno = (
+        df_ventas.groupby('_fecha_turno')['_fecha_turno']
+        .transform('count')
+    )
+
+    df_ventas['Costo_MO_$']       = (COSTO_TURNO / pedidos_por_turno).round(0).astype(int)
+    df_ventas['Pedidos_en_Turno'] = pedidos_por_turno.astype(int)
+
+    df_ventas.drop(columns=['_fecha_turno'], inplace=True)
+
+    # -------------------------------------------------------
+    # 7. COMISIONES Y MARGEN NETO
+    # -------------------------------------------------------
     def procesar_finanzas(fila):
-        venta         = pd.to_numeric(fila.get('Total', 0), errors='coerce') or 0
-        envio         = pd.to_numeric(fila.get('Costo_Envio', 0), errors='coerce') or 0
-        descuento     = pd.to_numeric(fila.get('Descuento_Total', 0), errors='coerce') or 0
-        costo_insumos = fila.get('Costo_Total_Venta', 0)
+        venta         = parsear_numero_ar(fila.get('Total', 0))
+        envio         = parsear_numero_ar(fila.get('Costo_Envio', 0))
+        descuento     = parsear_numero_ar(fila.get('Descuento_Total', 0))
+        costo_insumos = parsear_numero_ar(fila.get('Costo_Total_Venta', 0))
+        costo_mo      = parsear_numero_ar(fila.get('Costo_MO_$', 0))
 
         origen_raw       = str(fila.get('Origen', '')).lower().strip()
         origen_sin_tilde = origen_raw.replace('é', 'e').replace('ú', 'u')
@@ -70,45 +186,46 @@ def calcular_margen_detallado_big_salads():
         elif "menu online" in origen_sin_tilde:
             comision_online = round((venta + envio + descuento) * 0.023)
 
-        margen = round(venta - costo_insumos - comision_peya - comision_online)
+        margen = round(venta - costo_insumos - comision_peya - comision_online - costo_mo)
 
         return pd.Series([comision_peya, comision_online, margen])
 
-    print("4. Calculando márgenes y comisiones...")
+    print("5. Calculando márgenes y comisiones...")
     df_ventas[['Comision_PeYa_$', 'Comision_Tienda_Online_$', 'Margen_Neto_$']] = \
         df_ventas.apply(procesar_finanzas, axis=1)
 
+    total_numerico = df_ventas['Total'].apply(parsear_numero_ar)
+
     df_ventas['Margen_Neto_%'] = np.where(
-        df_ventas['Total'].astype(str).str.replace(',', '.').pipe(pd.to_numeric, errors='coerce').fillna(0) > 0,
-        (
-            df_ventas['Margen_Neto_$'] /
-            df_ventas['Total'].astype(str).str.replace(',', '.').pipe(pd.to_numeric, errors='coerce').fillna(1)
-            * 100
-        ).round(1),
+        total_numerico > 0,
+        (df_ventas['Margen_Neto_$'] / total_numerico * 100).round(1),
         0
     )
 
     # -------------------------------------------------------
-    # 5. REORDENAMIENTO FINAL
+    # 8. REORDENAMIENTO FINAL
     # -------------------------------------------------------
     columnas_al_final = [
         'Costo_Total_Venta',
+        'Comision_PeYa_$',
+        'Comision_Tienda_Online_$',
         'Margen_Neto_$',
         'Margen_Neto_%',
-        'Comision_PeYa_$',
-        'Comision_Tienda_Online_$'
+        'Costo_MO_$',
+        'Pedidos_en_Turno',
     ]
     columnas_principales = [c for c in df_ventas.columns if c not in columnas_al_final]
     df_final = df_ventas[columnas_principales + columnas_al_final].copy()
 
     # -------------------------------------------------------
-    # 6. LIMPIEZA DE DECIMALES
+    # 9. LIMPIEZA Y FORMATEO FINAL
     # -------------------------------------------------------
     df_final = df_final.replace([np.nan, np.inf, -np.inf], 0)
 
-    # Estas columnas van como entero puro, sin .0
     cols_enteras = [
         'Costo_Total_Venta',
+        'Costo_MO_$',
+        'Pedidos_en_Turno',
         'Comision_PeYa_$',
         'Comision_Tienda_Online_$',
         'Margen_Neto_$'
@@ -123,7 +240,6 @@ def calcular_margen_detallado_big_salads():
                 .astype(str)
             )
 
-    # Margen_Neto_%: si termina en .0 lo muestra entero, si tiene decimal real lo conserva
     if 'Margen_Neto_%' in df_final.columns:
         def formatear_pct(x):
             val = pd.to_numeric(x, errors='coerce')
@@ -134,15 +250,16 @@ def calcular_margen_detallado_big_salads():
         df_final['Margen_Neto_%'] = df_final['Margen_Neto_%'].apply(formatear_pct)
 
     # -------------------------------------------------------
-    # 7. SUBIR A GOOGLE SHEETS
+    # 10. SUBIR A GOOGLE SHEETS
     # -------------------------------------------------------
-    print("5. Actualizando Hoja 1 con las nuevas comisiones...")
+    print("6. Actualizando Hoja 1 con costos y márgenes...")
     datos_subir = [df_final.columns.tolist()] + df_final.astype(str).values.tolist()
 
     sheet_ventas.clear()
     sheet_ventas.update(values=datos_subir, range_name='A1')
 
-    print(f"✅ ¡Proceso completado! Columnas finales: {', '.join(columnas_al_final)}")
+    print("✅ ¡Proceso completado!")
+    print(f"   Columnas agregadas: {', '.join(columnas_al_final)}")
 
 
 if __name__ == "__main__":
