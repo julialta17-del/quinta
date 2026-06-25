@@ -15,12 +15,11 @@ def ejecutar_sincronizacion_macro():
     if creds_json:
         creds = Credentials.from_service_account_info(json.loads(creds_json), scopes=scope)
     else:
+        # Modo local para pruebas
         creds = Credentials.from_service_account_file('credentials.json', scopes=scope)
     
     client = gspread.authorize(creds)
     spreadsheet = client.open("Quinta Analisis Fudo")
-
-    
 
     # 2. CARGAR HOJAS
     try:
