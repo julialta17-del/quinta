@@ -12,7 +12,7 @@ from datetime import datetime
 MAIL_REMITENTE = "julialta17@gmail.com"
 MAIL_DESTINATARIOS = ["julialta17@gmail.com", "matiasgabrielrebolledo@gmail.com"]
 MAIL_PASSWORD = os.getenv("MAIL_PASSWORD")
-URL_DASHBOARD = "https://docs.google.com/spreadsheets/d/1uEFRm_0zEhsRGUX9PIomjUhiijxWVnCXnSMQuUJK5a8/edit"
+URL_DASHBOARD = "https://docs.google.com/spreadsheets/d/19ldgGkRWMylSAJNpcCOWN3tvsyYQ-4L6Rt8cZ1F3Jxw/edit"
 
 def limpiar_dinero_blindado(serie):
     """
