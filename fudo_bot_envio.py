@@ -118,7 +118,7 @@ def ejecutar():
     creds = Credentials.from_service_account_info(json.loads(creds_json), scopes=scope)
     client = gspread.authorize(creds)
     
-    sheet = client.open("Analisis Fudo").worksheet("Hoja 1")
+    sheet = client.open("Quinta Analisis Fudo").worksheet("Hoja 1")
     
     data = sheet.get_all_values()
     if len(data) < 2:
