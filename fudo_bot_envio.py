@@ -12,7 +12,7 @@ from datetime import datetime
 MAIL_REMITENTE = "julialta17@gmail.com"
 MAIL_DESTINATARIOS = ["julialta17@gmail.com", "matiasgabrielrebolledo@gmail.com"]
 MAIL_PASSWORD = os.getenv("MAIL_PASSWORD")
-URL_DASHBOARD = "https://docs.google.com/spreadsheets/d/19ldgGkRWMylSAJNpcCOWN3tvsyYQ-4L6Rt8cZ1F3Jxw/edit"
+URL_DASHBOARD = "https://docs.google.com/spreadsheets/d/1uEFRm_0zEhsRGUX9PIomjUhiijxWVnCXnSMQuUJK5a8/edit"
 
 def limpiar_dinero_blindado(serie):
     """
@@ -54,9 +54,9 @@ def limpiar_dinero_blindado(serie):
 
 def enviar_reporte_pro(datos):
     mensaje = MIMEMultipart()
-    mensaje["From"] = f"Big Salads <{MAIL_REMITENTE}>"
+    mensaje["From"] = f"Big Salads Quinta <{MAIL_REMITENTE}>"
     mensaje["To"] = ", ".join(MAIL_DESTINATARIOS)
-    mensaje["Subject"] = f"🥗 Resumen Ejecutivo Big Salads: {datos['fecha']}"
+    mensaje["Subject"] = f"🥗 Resumen Ejecutivo Quinta Big Salads: {datos['fecha']}"
 
     # Formateo visual para el mail (Estilo $ 1.250,50)
     def fmt(n):
@@ -70,7 +70,7 @@ def enviar_reporte_pro(datos):
     <html>
       <body style="font-family: Arial, sans-serif; color: #333;">
         <div style="max-width: 600px; margin: auto; border: 1px solid #ddd; padding: 25px; border-radius: 10px;">
-            <h2 style="color: #2c3e50; text-align: center; border-bottom: 2px solid #27ae60; padding-bottom: 10px;">🥗 Big Salads QUINTA</h2>
+            <h2 style="color: #2c3e50; text-align: center; border-bottom: 2px solid #27ae60; padding-bottom: 10px;">🥗 Big Salads Quinta</h2>
             
             <div style="background-color: #f9f9f9; padding: 15px; border-radius: 10px; margin-bottom: 20px;">
                 <p style="font-size: 18px; margin: 5px 0;">💰 <strong>Ventas Totales:</strong> ${venta_f}</p>
@@ -120,6 +120,7 @@ def ejecutar():
     
     sheet = client.open("Quinta Analisis Fudo").worksheet("Hoja 1")
     
+    # Leemos datos crudos para evitar que la API formatee mal los números
     data = sheet.get_all_values()
     if len(data) < 2:
         print("⚠️ La hoja está vacía.")
@@ -138,7 +139,7 @@ def ejecutar():
         print("⚠️ No hay ventas para procesar en el reporte.")
         return
 
-    # --- NUEVA LÓGICA DE MARGEN MATEMÁTICO ---
+    # --- LÓGICA DE MARGEN MATEMÁTICO ---
     def calcular_margen(row):
         precio_venta = row['Total_Num']
         costo_mercaderia = precio_venta * 0.35 # 35% fijo de costo
