@@ -14,7 +14,7 @@ ruta_excel = os.path.join(temp_excel_path, "ventas.xls")
 
 def procesar_y_analizar():
     print(f"Buscando archivo en: {ruta_excel}")
-    
+
     if not os.path.exists(ruta_excel):
         print(f"❌ Error: No se encontró el archivo en {ruta_excel}")
         # Listamos qué hay en la carpeta para debugguear en GitHub
@@ -36,13 +36,13 @@ def procesar_y_analizar():
         return
 
     df_v.columns = df_v.columns.str.strip()
-    
+
     # Procesamiento de fechas
     if not pd.api.types.is_datetime64_any_dtype(df_v['Creación']):
         df_v['Fecha_DT'] = pd.to_datetime(df_v['Creación'], unit='D', origin='1899-12-30', errors='coerce')
     else:
         df_v['Fecha_DT'] = df_v['Creación']
-    
+
     df_v['Fecha_Texto'] = df_v['Fecha_DT'].dt.strftime('%d/%m/%Y')
     df_v['Hora_Exacta'] = df_v['Fecha_DT'].dt.strftime('%H:%M')
     df_v['Hora_Int'] = df_v['Fecha_DT'].dt.hour 
@@ -51,8 +51,30 @@ def procesar_y_analizar():
     df_v['Turno'] = df_v['Hora_Int'].apply(lambda h: "Mañana" if h < 16 else "Noche")
 
     # 2. AGRUPAR ADICIONALES
-    # Agrupar Productos por Venta
-    prod_resumen = df_a.groupby('Id. Venta')['Producto'].apply(lambda x: ', '.join(x.astype(str))).reset_index()
+    
+    # Función para formatear cantidad y comentario de cada producto
+    def formatear_producto(row):
+        prod = str(row['Producto'])
+        cant = row['Cantidad']
+        comentario = str(row['Comentario']) if pd.notna(row['Comentario']) else ""
+        
+        # Extrae el detalle de productos genéricos desde el comentario (ej: gaseosas)
+        if comentario.strip():
+            # strip('- ') limpia los guiones finales que la exportación suele dejar
+            texto_item = f"{prod} ({comentario.strip('- ')})"
+        else:
+            texto_item = prod
+            
+        # Agrega el multiplicador si la cantidad es mayor a 1 (ej: 2x)
+        if pd.notna(cant) and cant > 1:
+            return f"{int(cant)}x {texto_item}"
+        return texto_item
+
+    # Crear una nueva columna con el formato final en las adiciones
+    df_a['Producto_Formateado'] = df_a.apply(formatear_producto, axis=1)
+
+    # Agrupar Productos por Venta usando la columna ya formateada
+    prod_resumen = df_a.groupby('Id. Venta')['Producto_Formateado'].apply(lambda x: ', '.join(x)).reset_index()
     prod_resumen.columns = ['Id', 'Detalle_Productos']
 
     # Sumar Descuentos por Venta
@@ -66,7 +88,7 @@ def procesar_y_analizar():
     # 3. CONSOLIDACIÓN
     columnas_interes = ['Id', 'Fecha_Texto', 'Hora_Exacta', 'Turno', 'Cliente', 'Total', 'Origen', 'Medio de Pago']
     consolidado = df_v[columnas_interes].copy()
-    
+
     consolidado = consolidado.merge(prod_resumen, on='Id', how='left')
     consolidado = consolidado.merge(desc_resumen, on='Id', how='left')
     consolidado = consolidado.merge(envio_resumen, on='Id', how='left')
@@ -82,7 +104,7 @@ def procesar_y_analizar():
 
 def subir_a_google(consolidado):
     scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-    
+
     # Intentar obtener credenciales de GitHub Secrets o archivo local
     creds_json = os.getenv("GOOGLE_CREDENTIALS")
     if creds_json:
@@ -90,21 +112,21 @@ def subir_a_google(consolidado):
         creds = Credentials.from_service_account_info(info, scopes=scope)
     else:
         creds = Credentials.from_service_account_file('credentials.json', scopes=scope)
-    
+
     client = gspread.authorize(creds)
-    
+
     try:
         # Abrimos el spreadsheet y la hoja
         spreadsheet = client.open("Quinta Analisis Fudo")
         sheet_data = spreadsheet.worksheet("Hoja 1")
-        
+
         # Limpiar y actualizar
         sheet_data.clear()
-        
+
         # Preparar datos (Headers + Valores)
         datos_finales = [consolidado.columns.values.tolist()] + \
                          consolidado.fillna("").astype(str).values.tolist()
-        
+
         sheet_data.update(range_name='A1', values=datos_finales)
         print("🚀 Hoja 1 actualizada con éxito en Google Sheets.")
     except Exception as e:
