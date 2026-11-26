@@ -60,43 +60,131 @@ def subir_a_google(consolidado):
 
 # --- SELENIUM ---
 chrome_options = Options()
-chrome_options.add_argument('--headless')
+chrome_options.add_argument('--headless=new')
 chrome_options.add_argument('--no-sandbox')
 chrome_options.add_argument('--disable-dev-shm-usage')
-chrome_options.add_experimental_option("prefs", {"download.default_directory": base_path})
+chrome_options.add_argument('--disable-gpu')
+chrome_options.add_argument('--window-size=1920,1080')
+chrome_options.add_argument('--remote-debugging-port=9222')
+
+# --- CONFIGURACIÓN ANTI-BOTS ---
+chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+chrome_options.add_experimental_option("useAutomationExtension", False)
+
+chrome_options.add_experimental_option("prefs", {
+    "download.default_directory": base_path,
+    "download.prompt_for_download": False,
+    "download.directory_upgrade": True,
+    "safebrowsing.enabled": True,
+    "profile.default_content_settings.popups": 0
+})
 
 driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
+
+# PERMISO FORZADO PARA DESCARGAS EN HEADLESS (CRÍTICO EN GITHUB ACTIONS)
+driver.execute_cdp_cmd('Page.setDownloadBehavior', {
+    'behavior': 'allow',
+    'downloadPath': base_path
+})
+
+# Borrar rastros de automatización
+driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
+    'source': '''
+        Object.defineProperty(navigator, 'webdriver', {
+          get: () => undefined
+        })
+    '''
+})
+
 wait = WebDriverWait(driver, 30)
 
 try:
     print("--- PASO: DESCARGA FUDO ---")
     driver.get("https://app-v2.fu.do/app/#!/sales")
+    
+    time.sleep(5) 
 
-    wait.until(EC.presence_of_element_located((By.ID, "user"))).send_keys("admin@bigsaladssexta")
+    print("Buscando formulario de login...")
+    campo_usuario = wait.until(EC.presence_of_element_located((By.ID, "user")))
+    campo_usuario.send_keys("admin@bigsaladssexta")
+    
     driver.find_element(By.ID, "password").send_keys("bigsexta")
     driver.find_element(By.ID, "password").submit()
+    
+    print("Login enviado, esperando carga de ventas (puede demorar en la nube)...")
+    
+    wait_largo = WebDriverWait(driver, 90)
+    
+    # 1. Tocar el botón Exportar original
+    export_btn = wait_largo.until(EC.presence_of_element_located((By.CSS_SELECTOR, "a[ng-click='exportSalesAsync()']")))
+    time.sleep(3)
+    print("Solicitando generación del reporte asíncrono...")
+    try:
+        export_btn.click()
+    except:
+        driver.execute_script("arguments[0].click();", export_btn)
 
+    # 2. Esperar 10 segundos
+    print("Esperando 10 segundos para que el servidor de Fudo genere el reporte...")
     time.sleep(10)
 
-    export_btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "a[ert-download-file='downloadSales()']")))
-    driver.execute_script("arguments[0].click();", export_btn)
+    # 3. Ir a notificaciones (Campanita)
+    print("Abriendo el panel de notificaciones...")
+    notif_btn = wait_largo.until(EC.presence_of_element_located((By.CSS_SELECTOR, "a.icon-system-notifications-navbar")))
+    driver.execute_script("arguments[0].click();", notif_btn)
+    
+    time.sleep(3) # Pausa para que se despliegue el menú visualmente
+    
+    # 4. Buscar el enlace del reporte dentro de las notificaciones
+    print("Buscando el enlace de descarga (ventas.zip) en las notificaciones...")
+    # Si tarda más de 10 segs en generarse, wait_largo lo esperará hasta 90 segs.
+    download_link = wait_largo.until(EC.presence_of_element_located((By.XPATH, "//a[contains(text(), 'ventas.zip')]")))
+    
+    # En lugar de hacer clic (que abre otra pestaña), leemos el link y navegamos a él directamente
+    # Esto evita bloqueos de ventanas emergentes (Pop-ups) en servidores en la nube.
+    link_url = download_link.get_attribute("href")
+    print("¡Enlace encontrado! Iniciando descarga directa...")
+    driver.get(link_url)
 
-    found_zip = False
-    for _ in range(30):
-        zips = [f for f in os.listdir(base_path) if f.lower().endswith(".zip")]
-        if zips:
-            found_zip = True
-            break
+    # 5. Esperar a que el archivo se guarde físicamente
+    print("Esperando que finalice la descarga del archivo...")
+    archivo_descargado = None
+    
+    for _ in range(60): 
+        archivos = [f for f in os.listdir(base_path) 
+                    if not f.lower().endswith('.crdownload') 
+                    and not f.lower().endswith('.tmp') 
+                    and os.path.isfile(os.path.join(base_path, f))]
+        
+        if archivos:
+            time.sleep(2) # Dar tiempo a que termine de escribirse en el disco
+            archivos_final = [f for f in os.listdir(base_path) 
+                              if not f.lower().endswith('.crdownload') 
+                              and not f.lower().endswith('.tmp') 
+                              and os.path.isfile(os.path.join(base_path, f))]
+            if archivos_final:
+                archivo_descargado = archivos_final[0]
+                break
         time.sleep(1)
 
-    if not found_zip: raise Exception("No se descargó el ZIP")
+    if not archivo_descargado: 
+        raise Exception("No se descargó ningún archivo. Chrome bloqueó la descarga o el enlace expiró.")
 
-    zip_path = os.path.join(base_path, zips[0])
-    with zipfile.ZipFile(zip_path, 'r') as z:
-        archivo_interno = z.namelist()[0]
-        z.extract(archivo_interno, base_path)
+    ruta_descarga = os.path.join(base_path, archivo_descargado)
+    
+    if archivo_descargado.lower().endswith('.zip'):
+        print("📁 Archivo ZIP descargado exitosamente. Descomprimiendo...")
+        with zipfile.ZipFile(ruta_descarga, 'r') as z:
+            archivo_interno = z.namelist()[0]
+            z.extract(archivo_interno, base_path)
+            if os.path.exists(ruta_excel): os.remove(ruta_excel)
+            shutil.move(os.path.join(base_path, archivo_interno), ruta_excel)
+    else:
+        print("📊 Archivo Excel directo descargado exitosamente.")
         if os.path.exists(ruta_excel): os.remove(ruta_excel)
-        shutil.move(os.path.join(base_path, archivo_interno), ruta_excel)
+        shutil.move(ruta_descarga, ruta_excel)
 
     # --- PROCESAMIENTO ---
     print("--- PASO: PROCESAMIENTO Y LIMPIEZA TOTAL ---")
@@ -112,62 +200,57 @@ try:
     df_v['Hora_Exacta'] = df_v['Fecha_DT'].dt.strftime('%H:%M')
     df_v['Turno'] = df_v['Fecha_DT'].dt.hour.apply(lambda h: "Mañana" if h < 16 else "Noche")
 
-    # Filtro: solo filas con fecha de hoy
     hoy = datetime.now().date()
     df_v = df_v[df_v['Fecha_DT'].dt.date == hoy]
 
     if df_v.empty:
-        raise Exception(f"No hay ventas para el día de hoy ({hoy.strftime('%d/%m/%Y')})")
+        print(f"⚠️ No hay ventas para el día de hoy ({hoy.strftime('%d/%m/%Y')}). Deteniendo ejecución sin error.")
+    else:
+        print(f"✅ Filas de hoy ({hoy.strftime('%d/%m/%Y')}): {len(df_v)}")
 
-    print(f"✅ Filas de hoy ({hoy.strftime('%d/%m/%Y')}): {len(df_v)}")
+        df_a = pd.read_excel(ruta_excel, sheet_name='Adiciones')
+        df_d = pd.read_excel(ruta_excel, sheet_name='Descuentos')
+        df_e = pd.read_excel(ruta_excel, sheet_name='Costos de Envío')
 
-    # --- HOJAS ADICIONALES ---
-    df_a = pd.read_excel(ruta_excel, sheet_name='Adiciones')
-    df_d = pd.read_excel(ruta_excel, sheet_name='Descuentos')
-    df_e = pd.read_excel(ruta_excel, sheet_name='Costos de Envío')
+        prod = df_a.groupby('Id. Venta')['Producto'].apply(lambda x: ', '.join(x.astype(str))).reset_index()
+        prod.columns = ['Id', 'Detalle_Productos']
 
-    # Detalle de productos por venta
-    prod = df_a.groupby('Id. Venta')['Producto'].apply(lambda x: ', '.join(x.astype(str))).reset_index()
-    prod.columns = ['Id', 'Detalle_Productos']
+        total_bruto = df_a.groupby('Id. Venta')['Precio'].sum().reset_index()
+        total_bruto.columns = ['Id', 'Total_Productos_Bruto']
 
-    # Total bruto de productos por venta (suma de precios en Adiciones)
-    total_bruto = df_a.groupby('Id. Venta')['Precio'].sum().reset_index()
-    total_bruto.columns = ['Id', 'Total_Productos_Bruto']
+        desc = df_d.groupby('Id. Venta')['Valor'].sum().reset_index()
+        desc.columns = ['Id', 'Descuento_Total']
 
-    # Descuentos por venta
-    desc = df_d.groupby('Id. Venta')['Valor'].sum().reset_index()
-    desc.columns = ['Id', 'Descuento_Total']
+        env = df_e.groupby('Id. Venta')['Valor'].sum().reset_index()
+        env.columns = ['Id', 'Costo_Envio']
 
-    # Costos de envío por venta
-    env = df_e.groupby('Id. Venta')['Valor'].sum().reset_index()
-    env.columns = ['Id', 'Costo_Envio']
+        consolidado = df_v[['Id', 'Fecha_Texto', 'Hora_Exacta', 'Turno', 'Cliente', 'Total', 'Origen', 'Medio de Pago']].copy()
+        consolidado = consolidado.merge(prod,        on='Id', how='left')
+        consolidado = consolidado.merge(total_bruto, on='Id', how='left')
+        consolidado = consolidado.merge(desc,        on='Id', how='left')
+        consolidado = consolidado.merge(env,         on='Id', how='left')
+        consolidado = consolidado.fillna(0)
 
-    # --- CONSOLIDADO ---
-    consolidado = df_v[['Id', 'Fecha_Texto', 'Hora_Exacta', 'Turno', 'Cliente', 'Total', 'Origen', 'Medio de Pago']].copy()
-    consolidado = consolidado.merge(prod,        on='Id', how='left')
-    consolidado = consolidado.merge(total_bruto, on='Id', how='left')
-    consolidado = consolidado.merge(desc,        on='Id', how='left')
-    consolidado = consolidado.merge(env,         on='Id', how='left')
-    consolidado = consolidado.fillna(0)
+        cols_enteras = ['Id', 'Total', 'Total_Productos_Bruto', 'Descuento_Total', 'Costo_Envio']
+        for col in cols_enteras:
+            if col in consolidado.columns:
+                consolidado[col] = limpiar_a_entero_string(consolidado[col])
 
-    # --- LIMPIEZA DE DECIMALES ---
-    cols_enteras = ['Id', 'Total', 'Total_Productos_Bruto', 'Descuento_Total', 'Costo_Envio']
-    for col in cols_enteras:
-        if col in consolidado.columns:
-            consolidado[col] = limpiar_a_entero_string(consolidado[col])
+        orden = [
+            'Id', 'Fecha_Texto', 'Hora_Exacta', 'Turno', 'Cliente',
+            'Total', 'Origen', 'Medio de Pago', 'Detalle_Productos',
+            'Total_Productos_Bruto', 'Descuento_Total', 'Costo_Envio'
+        ]
+        consolidado = consolidado[orden]
 
-    # --- ORDEN FINAL DE COLUMNAS ---
-    orden = [
-        'Id', 'Fecha_Texto', 'Hora_Exacta', 'Turno', 'Cliente',
-        'Total', 'Origen', 'Medio de Pago', 'Detalle_Productos',
-        'Total_Productos_Bruto', 'Descuento_Total', 'Costo_Envio'
-    ]
-    consolidado = consolidado[orden]
-
-    subir_a_google(consolidado)
+        subir_a_google(consolidado)
 
 except Exception as e:
-    print(f"❌ ERROR: {e}")
+    print(f"❌ ERROR EN SELENIUM:")
+    print(f"Tipo de error: {type(e).__name__}")
+    print(f"URL en el momento del error: {driver.current_url}")
+    print(f"Detalle del error: {e}")
+    
 finally:
     driver.quit()
     print("--- PROCESO TERMINADO ---")
