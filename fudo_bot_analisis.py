@@ -39,7 +39,7 @@ def subir_a_google(df_consolidado):
 
     try:
         # ⚠️ RECUERDA PONER EL ID DE TU GOOGLE SHEET AQUÍ
-        spreadsheet = client.open_by_key("19ldgGkRWMylSAJNpcCOWN3tvsyYQ-4L6Rt8cZ1F3Jxw")
+        spreadsheet = client.open_by_key("PEGA_AQUI_EL_ID_DE_TU_DOCUMENTO")
         sheet_data = spreadsheet.worksheet("Hoja 1")
         sheet_data.clear()
 
@@ -68,7 +68,8 @@ driver.execute_cdp_cmd('Emulation.setTimezoneOverride', {
     'timezoneId': 'America/Argentina/Buenos_Aires'
 })
 
-wait_largo = WebDriverWait(driver, 40)
+# Aumentamos el tiempo máximo de espera a 60 segundos
+wait_largo = WebDriverWait(driver, 60)
 
 try:
     print("--- PASO: EXTRACCIÓN DE DATOS EN PANTALLA ---")
@@ -86,150 +87,154 @@ try:
     filas_xpath = "//table/tbody/tr"
     filas = driver.find_elements(By.XPATH, filas_xpath)
     total_filas = len(filas)
-    print(f"Se encontraron {total_filas} registros. Analizando...")
+    print(f"Se encontraron {total_filas} registros en total. Analizando...")
 
     datos_ventas = []
 
     for i in range(total_filas):
-        tr_list = driver.find_elements(By.XPATH, filas_xpath)
-        if i >= len(tr_list): break
-        fila = tr_list[i]
-        celdas = fila.find_elements(By.TAG_NAME, "td")
-        
-        if len(celdas) < 8:
-            continue
+        try: # SISTEMA ANTI-CHOQUES: Si falla una fila, anota el error y sigue con la próxima
+            tr_list = driver.find_elements(By.XPATH, filas_xpath)
+            if i >= len(tr_list): break
+            fila = tr_list[i]
+            celdas = fila.find_elements(By.TAG_NAME, "td")
             
-        estado = celdas[2].text.strip()
-        if estado.lower() == "en curso":
-            continue
+            if len(celdas) < 8:
+                continue
+                
+            estado = celdas[2].text.strip()
+            if estado.lower() == "en curso":
+                continue
+                
+            hora_inicio_str = celdas[0].text.strip()
+            cliente_str = celdas[5].text.strip()
+            total_tabla_str = celdas[7].text.strip() 
             
-        hora_inicio_str = celdas[0].text.strip()
-        cliente_str = celdas[5].text.strip()
-        
-        # 1. Scrolleamos la fila centralmente y hacemos clic
-        driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", fila)
-        time.sleep(0.5)
-        driver.execute_script("arguments[0].click();", fila)
-        
-        # Esperamos que aparezca el panel lateral y el Total
-        panel = wait_largo.until(EC.presence_of_element_located((By.CSS_SELECTOR, "aside.page__content__aside")))
-        wait_largo.until(EC.presence_of_element_located((By.CSS_SELECTOR, "aside.page__content__aside .total strong")))
-        
-        # 2. SCROLL HASTA EL FINAL DEL PANEL LATERAL
-        # Esto asegura que todas las secciones (como Pagos) carguen completamente
-        driver.execute_script("""
-            var panel = document.querySelector('aside.page__content__aside .content');
-            if (panel) { panel.scrollTo(0, panel.scrollHeight); }
-        """)
-        time.sleep(1.5)
-        
-        url_actual = driver.current_url
-        id_venta = url_actual.split('/')[-1] if '/sales/' in url_actual else ""
-        
-        # --- EXTRACCIÓN QUIRÚRGICA POR HTML (DOM) ---
-        origen = ""
-        medio_pago = ""
-        detalle_productos = ""
-        descuento = "0"
-        costo_envio = "0"
-        total_venta = "0"
-        
-        # A. TOTAL
-        try:
-            total_venta = panel.find_element(By.CSS_SELECTOR, ".total strong").text
-        except: pass
+            # 1. Scrolleamos con cuidado y hacemos clic
+            driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", fila)
+            time.sleep(1) # Pausa extra para que el scroll termine
+            driver.execute_script("arguments[0].click();", fila)
+            
+            # 2. Esperamos al panel lateral correcto (ert-sales-show)
+            panel = wait_largo.until(EC.presence_of_element_located((By.TAG_NAME, "ert-sales-show")))
+            time.sleep(3) # Damos tiempo a Angular a cargar el texto interno
+            
+            # 3. Hacemos Scroll hasta el final del panel para forzar la carga de los Pagos
+            driver.execute_script("""
+                var panel_content = document.querySelector('ert-sales-show .content');
+                if (panel_content) { panel_content.scrollTo(0, panel_content.scrollHeight); }
+            """)
+            time.sleep(1.5)
+            
+            url_actual = driver.current_url
+            id_venta = url_actual.split('/')[-1] if '/sales/' in url_actual else ""
+            
+            # --- EXTRACCIÓN QUIRÚRGICA POR HTML (DOM) ---
+            origen = ""
+            medio_pago = ""
+            detalle_productos = ""
+            descuento = "0"
+            costo_envio = "0"
+            total_venta = total_tabla_str # Por defecto usamos el de la tabla
+            
+            # A. TOTAL
+            try:
+                total_venta = panel.find_element(By.CSS_SELECTOR, ".total strong").text
+            except: pass
 
-        # B. ORIGEN / TIPO
-        try:
-            labels = panel.find_elements(By.CSS_SELECTOR, "ul.list.show li label")
-            for label in labels:
-                texto_label = label.text
-                if "Tipo" in texto_label:
-                    if "Delivery" in texto_label: origen = "Pedidos Ya"
-                    elif "Mostrador" in texto_label: origen = ""
-                if "Origen" in texto_label and "Pedidos" in texto_label:
-                    origen = "Pedidos Ya"
-        except: pass
+            # B. ORIGEN / TIPO
+            try:
+                labels = panel.find_elements(By.CSS_SELECTOR, "ul.list.show li label")
+                for label in labels:
+                    texto_label = label.text
+                    if "Tipo" in texto_label:
+                        if "Delivery" in texto_label: origen = "Pedidos Ya"
+                        elif "Mostrador" in texto_label: origen = ""
+                    if "Origen" in texto_label and "Pedidos" in texto_label:
+                        origen = "Pedidos Ya"
+            except: pass
 
-        # C. ADICIONES (PRODUCTOS)
-        try:
-            adiciones = panel.find_elements(By.CSS_SELECTOR, "ul.additions li.addition")
-            prods = []
-            for ad in adiciones:
-                if "canceled" not in ad.get_attribute("class"):
+            # C. ADICIONES (PRODUCTOS)
+            try:
+                adiciones = panel.find_elements(By.CSS_SELECTOR, "ul.additions li.addition")
+                prods = []
+                for ad in adiciones:
+                    if "canceled" not in ad.get_attribute("class"):
+                        try:
+                            qty = ad.find_element(By.CSS_SELECTOR, ".count").text.strip()
+                            name = ad.find_element(By.CSS_SELECTOR, ".item-label").text.strip()
+                            name = name.split('\n')[0].strip()
+                            prods.append(f"{qty} {name}".strip())
+                        except: pass
+                detalle_productos = " | ".join(prods)
+            except: pass
+
+            # D. DESCUENTOS Y ENVÍOS
+            try:
+                modifiers = panel.find_elements(By.CSS_SELECTOR, "li.bill-modifier")
+                for mod in modifiers:
+                    text = mod.text.lower()
                     try:
-                        qty = ad.find_element(By.CSS_SELECTOR, ".count").text.strip()
-                        name = ad.find_element(By.CSS_SELECTOR, ".item-label").text.strip()
-                        # Limpiar nombre por si trae tags extras (como el icono de precio de lista)
-                        name = name.split('\n')[0].strip()
-                        prods.append(f"{qty} {name}".strip())
+                        price = mod.find_element(By.CSS_SELECTOR, ".price").text
+                        if "descuento" in text:
+                            descuento = price
+                        elif "envío" in text or "envio" in text:
+                            costo_envio = price
                     except: pass
-            detalle_productos = " | ".join(prods)
-        except: pass
+            except: pass
 
-        # D. DESCUENTOS Y ENVÍOS
-        try:
-            modifiers = panel.find_elements(By.CSS_SELECTOR, "li.bill-modifier")
-            for mod in modifiers:
-                text = mod.text.lower()
-                try:
-                    price = mod.find_element(By.CSS_SELECTOR, ".price").text
-                    if "descuento" in text:
-                        descuento = price
-                    elif "envío" in text or "envio" in text:
-                        costo_envio = price
-                except: pass
-        except: pass
+            # E. MEDIOS DE PAGO
+            try:
+                pagos_seccion = panel.find_element(By.CSS_SELECTOR, "ui-view[name='edit_payments']")
+                pagos_items = pagos_seccion.find_elements(By.CSS_SELECTOR, "li")
+                medios = []
+                for p in pagos_items:
+                    if "canceled" not in p.get_attribute("class"):
+                        try:
+                            nombre_pago = p.find_element(By.CSS_SELECTOR, ".item-label").text.strip()
+                            if nombre_pago:
+                                medios.append(nombre_pago)
+                        except: pass
+                medio_pago = " | ".join(medios)
+            except: pass
 
-        # E. MEDIOS DE PAGO
-        try:
-            pagos_seccion = panel.find_element(By.CSS_SELECTOR, "ui-view[name='edit_payments']")
-            pagos_items = pagos_seccion.find_elements(By.CSS_SELECTOR, "li")
-            medios = []
-            for p in pagos_items:
-                if "canceled" not in p.get_attribute("class"):
-                    try:
-                        nombre_pago = p.find_element(By.CSS_SELECTOR, ".item-label").text.strip()
-                        if nombre_pago:
-                            medios.append(nombre_pago)
-                    except: pass
-            medio_pago = " | ".join(medios)
-        except: pass
+            # --- FECHAS Y TURNOS ---
+            try:
+                dt_obj = datetime.strptime(hora_inicio_str, "%d/%m/%y %H:%M:%S")
+                fecha_texto = dt_obj.strftime("%d/%m/%Y")
+                hora_exacta = dt_obj.strftime("%H:%M")
+                turno = "Mañana" if dt_obj.hour < 16 else "Noche"
+            except:
+                fecha_texto = ""
+                hora_exacta = hora_inicio_str
+                turno = ""
 
-        # --- FECHAS Y TURNOS ---
-        try:
-            dt_obj = datetime.strptime(hora_inicio_str, "%d/%m/%y %H:%M:%S")
-            fecha_texto = dt_obj.strftime("%d/%m/%Y")
-            hora_exacta = dt_obj.strftime("%H:%M")
-            turno = "Mañana" if dt_obj.hour < 16 else "Noche"
-        except:
-            fecha_texto = ""
-            hora_exacta = hora_inicio_str
-            turno = ""
+            # --- GUARDAR FILA ---
+            datos_ventas.append({
+                'Id': id_venta,
+                'Fecha_Texto': fecha_texto,
+                'Hora_Exacta': hora_exacta,
+                'Turno': turno,
+                'Cliente': cliente_str,
+                'Total': limpiar_numero(total_venta),
+                'Origen': origen,
+                'Medio de Pago': medio_pago,
+                'Detalle_Productos': detalle_productos,
+                'Descuento_Total': limpiar_numero(descuento),
+                'Costo_Envio': limpiar_numero(costo_envio),
+                'Costo_Total_Venta': "",
+                'Comision_PeYa_$': "",
+                'Comision_Tienda_Online_$': "",
+                'Margen_Neto_$': "",
+                'Margen_Neto_%': "",
+                'Costo_MO_$': "",
+                'Pedidos_en_Turno': ""
+            })
 
-        # --- GUARDAR FILA ---
-        datos_ventas.append({
-            'Id': id_venta,
-            'Fecha_Texto': fecha_texto,
-            'Hora_Exacta': hora_exacta,
-            'Turno': turno,
-            'Cliente': cliente_str,
-            'Total': limpiar_numero(total_venta),
-            'Origen': origen,
-            'Medio de Pago': medio_pago,
-            'Detalle_Productos': detalle_productos,
-            'Descuento_Total': limpiar_numero(descuento),
-            'Costo_Envio': limpiar_numero(costo_envio),
-            'Costo_Total_Venta': "",
-            'Comision_PeYa_$': "",
-            'Comision_Tienda_Online_$': "",
-            'Margen_Neto_$': "",
-            'Margen_Neto_%': "",
-            'Costo_MO_$': "",
-            'Pedidos_en_Turno': ""
-        })
+        except Exception as error_fila:
+            print(f"⚠️ Error procesando la fila {i+1} de {total_filas}. Saltando a la siguiente. Detalle: {error_fila}")
+            continue
 
-    print(f"✅ Se extrajeron {len(datos_ventas)} ventas cerradas.")
+    print(f"✅ Se extrajeron {len(datos_ventas)} ventas cerradas con éxito.")
     
     columnas_orden = [
         'Id', 'Fecha_Texto', 'Hora_Exacta', 'Turno', 'Cliente', 'Total', 'Origen', 'Medio de Pago', 
@@ -242,10 +247,10 @@ try:
         df_consolidado = pd.DataFrame(datos_ventas, columns=columnas_orden)
         subir_a_google(df_consolidado)
     else:
-        print("⚠️ No se generó el Excel porque no había ventas cerradas.")
+        print("⚠️ No se generó el Excel porque no había ventas válidas.")
 
 except Exception as e:
-    print(f"❌ ERROR EN EXTRACCIÓN:")
+    print(f"❌ ERROR CRÍTICO EN EXTRACCIÓN:")
     print(f"Tipo de error: {type(e).__name__}")
     print(f"Detalle: {e}")
     
