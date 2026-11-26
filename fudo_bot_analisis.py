@@ -39,7 +39,7 @@ def subir_a_google(df_consolidado):
 
     try:
         # ⚠️ RECUERDA PONER EL ID DE TU GOOGLE SHEET AQUÍ
-        spreadsheet = client.open_by_key("PEGA_AQUI_EL_ID_DE_TU_DOCUMENTO")
+        spreadsheet = client.open_by_key("19ldgGkRWMylSAJNpcCOWN3tvsyYQ-4L6Rt8cZ1F3Jxw")
         sheet_data = spreadsheet.worksheet("Hoja 1")
         sheet_data.clear()
 
