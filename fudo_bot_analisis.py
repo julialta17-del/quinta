@@ -14,6 +14,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.common.action_chains import ActionChains # Importante para clics humanos
 
 # --- CONFIGURACIÓN DE RUTAS ---
 base_path = os.path.join(os.getcwd(), "descargas")
@@ -46,7 +47,6 @@ def subir_a_google(consolidado):
         sheet_data = spreadsheet.worksheet("Hoja 1")
         sheet_data.clear()
 
-        # Red de seguridad para números
         for col in consolidado.select_dtypes(include=['float64', 'float32', 'int64', 'int32']).columns:
             consolidado[col] = consolidado[col].fillna(0).round(0).astype(int).astype(str)
 
@@ -84,7 +84,6 @@ chrome_options.add_experimental_option("prefs", {
 
 driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
 
-# PERMISO FORZADO PARA DESCARGAS EN HEADLESS
 driver.execute_cdp_cmd('Page.setDownloadBehavior', {
     'behavior': 'allow',
     'downloadPath': base_path
@@ -116,7 +115,6 @@ try:
     print("Login enviado, esperando carga de ventas (puede demorar en la nube)...")
     wait_largo = WebDriverWait(driver, 90)
     
-    # 1. Tocar el botón Exportar
     export_btn = wait_largo.until(EC.presence_of_element_located((By.CSS_SELECTOR, "a[ng-click='exportSalesAsync()']")))
     time.sleep(3)
     print("Solicitando generación del reporte asíncrono...")
@@ -125,51 +123,34 @@ try:
     except:
         driver.execute_script("arguments[0].click();", export_btn)
 
-    # 2. Esperar 10 segundos
-    print("Esperando 10 segundos para que el servidor de Fudo genere el reporte...")
-    time.sleep(10)
+    print("Esperando 15 segundos para que el servidor de Fudo genere el reporte...")
+    time.sleep(15) # Aumentado a 15s para dar más margen al servidor
 
-    # 3. Ir a notificaciones (Campanita)
     print("Abriendo el panel de notificaciones...")
     notif_btn = wait_largo.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "a.icon-system-notifications-navbar")))
+    ActionChains(driver).move_to_element(notif_btn).click().perform()
+    time.sleep(4) 
     
-    # Clic normal para evitar bugs en la página
+    print("Buscando el enlace de descarga...")
     try:
-        notif_btn.click()
+        # 1. Intentamos atrapar el enlace directamente desde el menú desplegable si ya es visible
+        download_link = driver.find_element(By.CSS_SELECTOR, "a[href*='fudo-reports.s3']")
+        print("¡Enlace encontrado directamente en el menú!")
     except:
-        driver.execute_script("arguments[0].click();", notif_btn)
-    
-    time.sleep(3) 
-    
-    # 4. Hacer clic en el mensaje de la notificación
-    print("Abriendo el detalle de la notificación...")
-    notif_item = wait_largo.until(EC.presence_of_element_located((By.XPATH, "//*[contains(text(), 'reporte de ventas está listo')]")))
-    
-    # Usamos clic normal (físico) para que la página de Fudo no crashee
-    try:
-        notif_item.click()
-    except:
-        # Si algo lo tapa, clickeamos su contenedor padre por seguridad
-        driver.execute_script("arguments[0].parentNode.click();", notif_item)
+        # 2. Si está oculto, usamos clic humano simulado para abrir el panel lateral sin crashear la página
+        print("Abriendo el detalle de la notificación (clic humano simulado)...")
+        notif_item = wait_largo.until(EC.presence_of_element_located((By.XPATH, "//*[contains(text(), 'reporte de ventas está listo')]")))
         
-    time.sleep(5) 
-
-    # 5. Buscar el enlace de descarga
-    print("Buscando el enlace de descarga en el panel...")
-    try:
-        # Busca cualquier link que vaya al servidor de reportes de Fudo
+        ActionChains(driver).move_to_element(notif_item).click().perform()
+        time.sleep(5)
+        
         download_link = wait_largo.until(EC.presence_of_element_located((By.CSS_SELECTOR, "a[href*='fudo-reports.s3']")))
-    except Exception as fallback_e:
-        print("⚠️ La pantalla de Fudo se trabó. Refrescando para forzar la carga...")
-        driver.refresh() # Refresca la página en la notificación
-        time.sleep(8)
-        download_link = wait_largo.until(EC.presence_of_element_located((By.CSS_SELECTOR, "a[href*='fudo-reports.s3']")))
+        print("¡Enlace encontrado en el panel lateral!")
     
     link_url = download_link.get_attribute("href")
-    print("¡Enlace encontrado! Iniciando descarga directa...")
+    print("Iniciando descarga directa...")
     driver.get(link_url)
 
-    # 6. Esperar a que el archivo se guarde físicamente
     print("Esperando que finalice la descarga del archivo...")
     archivo_descargado = None
     
@@ -229,7 +210,6 @@ try:
     else:
         print(f"✅ Filas de hoy ({hoy.strftime('%d/%m/%Y')}): {len(df_v)}")
 
-        # Extracción y cruce de datos hoja por hoja
         df_a = pd.read_excel(ruta_excel, sheet_name='Adiciones')
         df_d = pd.read_excel(ruta_excel, sheet_name='Descuentos')
         df_e = pd.read_excel(ruta_excel, sheet_name='Costos de Envío')
