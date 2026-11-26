@@ -14,7 +14,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
-from selenium.webdriver.common.action_chains import ActionChains # Importante para clics humanos
+from selenium.webdriver.common.action_chains import ActionChains
 
 # --- CONFIGURACIÓN DE RUTAS ---
 base_path = os.path.join(os.getcwd(), "descargas")
@@ -124,31 +124,23 @@ try:
         driver.execute_script("arguments[0].click();", export_btn)
 
     print("Esperando 15 segundos para que el servidor de Fudo genere el reporte...")
-    time.sleep(15) # Aumentado a 15s para dar más margen al servidor
+    time.sleep(15) 
 
-    print("Abriendo el panel de notificaciones...")
+    print("Abriendo el panel de notificaciones (Campanita)...")
     notif_btn = wait_largo.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "a.icon-system-notifications-navbar")))
-    ActionChains(driver).move_to_element(notif_btn).click().perform()
-    time.sleep(4) 
     
-    print("Buscando el enlace de descarga...")
     try:
-        # 1. Intentamos atrapar el enlace directamente desde el menú desplegable si ya es visible
-        download_link = driver.find_element(By.CSS_SELECTOR, "a[href*='fudo-reports.s3']")
-        print("¡Enlace encontrado directamente en el menú!")
+        notif_btn.click()
     except:
-        # 2. Si está oculto, usamos clic humano simulado para abrir el panel lateral sin crashear la página
-        print("Abriendo el detalle de la notificación (clic humano simulado)...")
-        notif_item = wait_largo.until(EC.presence_of_element_located((By.XPATH, "//*[contains(text(), 'reporte de ventas está listo')]")))
-        
-        ActionChains(driver).move_to_element(notif_item).click().perform()
-        time.sleep(5)
-        
-        download_link = wait_largo.until(EC.presence_of_element_located((By.CSS_SELECTOR, "a[href*='fudo-reports.s3']")))
-        print("¡Enlace encontrado en el panel lateral!")
+        driver.execute_script("arguments[0].click();", notif_btn)
+    
+    print("Buscando el enlace de descarga Oculto en el menú desplegable...")
+    # Buscamos la mera presencia del link en el código fuente (DOM), sin importar si está visible o no.
+    # Así evitamos hacer clic y crashear la página.
+    download_link = wait_largo.until(EC.presence_of_element_located((By.CSS_SELECTOR, "a[href*='fudo-reports.s3']")))
     
     link_url = download_link.get_attribute("href")
-    print("Iniciando descarga directa...")
+    print("¡Enlace encontrado! Iniciando descarga directa...")
     driver.get(link_url)
 
     print("Esperando que finalice la descarga del archivo...")
