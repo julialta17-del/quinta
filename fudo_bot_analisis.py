@@ -1,7 +1,6 @@
 import os
 import time
-import zipfile
-import shutil
+import re
 import json
 import pandas as pd
 import gspread
@@ -15,20 +14,16 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 
-# --- CONFIGURACIÓN DE RUTAS ---
-base_path = os.path.join(os.getcwd(), "descargas")
-temp_excel_path = os.path.join(base_path, "temp_excel")
-ruta_excel = os.path.join(temp_excel_path, "ventas.xls")
-os.makedirs(temp_excel_path, exist_ok=True)
+def limpiar_numero(val):
+    if not val: return "0"
+    # Quita puntos de miles, cambia coma por punto para decimales, redondea y devuelve entero en texto
+    v = str(val).replace('$', '').strip().replace('.', '').replace(',', '.')
+    try:
+        return str(int(round(float(v))))
+    except:
+        return "0"
 
-def limpiar_a_entero_string(serie):
-    temp = pd.to_numeric(
-        serie.astype(str).str.replace(',', '.', regex=False),
-        errors='coerce'
-    ).fillna(0)
-    return temp.round(0).astype(int).astype(str)
-
-def subir_a_google(consolidado):
+def subir_a_google(df_consolidado):
     print("--- PASO: CONEXIÓN A GOOGLE SHEETS ---")
     scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     creds_json = os.getenv("GOOGLE_CREDENTIALS")
@@ -42,15 +37,12 @@ def subir_a_google(consolidado):
 
     try:
         # ⚠️ RECUERDA PONER EL ID DE TU GOOGLE SHEET AQUÍ
-        spreadsheet = client.open_by_key("PEGA_AQUI_EL_ID_DE_TU_DOCUMENTO")
+        spreadsheet = client.open_by_key("19ldgGkRWMylSAJNpcCOWN3tvsyYQ-4L6Rt8cZ1F3Jxw")
         sheet_data = spreadsheet.worksheet("Hoja 1")
         sheet_data.clear()
 
-        for col in consolidado.select_dtypes(include=['float64', 'float32', 'int64', 'int32']).columns:
-            consolidado[col] = consolidado[col].fillna(0).round(0).astype(int).astype(str)
-
-        datos_finales = [consolidado.columns.values.tolist()] + \
-                         consolidado.fillna("").astype(str).values.tolist()
+        datos_finales = [df_consolidado.columns.values.tolist()] + \
+                         df_consolidado.fillna("").astype(str).values.tolist()
 
         sheet_data.update(range_name='A1', values=datos_finales)
         print("🚀 ¡DATOS ACTUALIZADOS EN HOJA 1!")
@@ -65,201 +57,146 @@ chrome_options.add_argument('--no-sandbox')
 chrome_options.add_argument('--disable-dev-shm-usage')
 chrome_options.add_argument('--disable-gpu')
 chrome_options.add_argument('--window-size=1920,1080')
-chrome_options.add_argument('--remote-debugging-port=9222')
-
-chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-chrome_options.add_argument("--disable-blink-features=AutomationControlled")
-chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-chrome_options.add_experimental_option("useAutomationExtension", False)
-
-chrome_options.add_experimental_option("prefs", {
-    "download.default_directory": base_path,
-    "download.prompt_for_download": False,
-    "download.directory_upgrade": True,
-    "safebrowsing.enabled": True,
-    "profile.default_content_settings.popups": 0
-})
+chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
 
 driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
-
-driver.execute_cdp_cmd('Page.setDownloadBehavior', {
-    'behavior': 'allow',
-    'downloadPath': base_path
-})
-
-driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
-    'source': '''
-        Object.defineProperty(navigator, 'webdriver', {
-          get: () => undefined
-        })
-    '''
-})
-
-wait = WebDriverWait(driver, 30)
+wait_largo = WebDriverWait(driver, 40)
 
 try:
-    print("--- PASO: DESCARGA FUDO ---")
+    print("--- PASO: EXTRACCIÓN DE DATOS EN PANTALLA ---")
     driver.get("https://app-v2.fu.do/app/#!/sales")
-    
     time.sleep(5) 
 
-    print("Buscando formulario de login...")
-    campo_usuario = wait.until(EC.presence_of_element_located((By.ID, "user")))
-    campo_usuario.send_keys("gestion@bigsaladsquinta")
-    
+    print("Iniciando sesión...")
+    wait_largo.until(EC.presence_of_element_located((By.ID, "user"))).send_keys("gestion@bigsaladsquinta")
     driver.find_element(By.ID, "password").send_keys("BigQuinta22")
     driver.find_element(By.ID, "password").submit()
     
-    print("Login enviado, esperando carga de ventas...")
-    wait_largo = WebDriverWait(driver, 90)
+    print("Esperando que cargue la tabla de ventas...")
+    time.sleep(15) # Tiempo para que cargue la info del día
     
-    export_btn = wait_largo.until(EC.presence_of_element_located((By.CSS_SELECTOR, "a[ng-click='exportSalesAsync()']")))
-    time.sleep(3)
-    print("Solicitando generación del reporte asíncrono...")
-    try:
-        export_btn.click()
-    except:
-        driver.execute_script("arguments[0].click();", export_btn)
+    filas_xpath = "//table/tbody/tr"
+    filas = driver.find_elements(By.XPATH, filas_xpath)
+    total_filas = len(filas)
+    print(f"Se encontraron {total_filas} registros visibles. Analizando uno a uno...")
 
-    print("Esperando 20 segundos para que Fudo genere el archivo...")
-    time.sleep(20) 
+    datos_ventas = []
 
-    # --- EL TRUCO PARA FORZAR LA RECARGA ---
-    print("Limpiando el navegador para forzar recarga...")
-    driver.get("about:blank")
-    time.sleep(2)
-    
-    print("Navegando a la vista completa de Notificaciones...")
-    driver.get("https://app-v2.fu.do/app/#!/notifications/")
-    time.sleep(8) 
-    
-    print("Haciendo clic en la fila de la tabla 'Reporte disponible'...")
-    fila = wait_largo.until(EC.presence_of_element_located((By.XPATH, "//tr[contains(., 'Reporte disponible')]")))
-    driver.execute_script("arguments[0].click();", fila)
-    
-    time.sleep(5) 
-    
-    print("Buscando el enlace del archivo ZIP en el panel derecho...")
-    download_link = wait_largo.until(EC.presence_of_element_located((By.XPATH, "//a[contains(@href, '.zip')]")))
-    link_url = download_link.get_attribute("href")
-    
-    print(f"¡Enlace atrapado con éxito! Iniciando descarga directa...")
-    driver.get(link_url)
-
-    print("Esperando que finalice la descarga del archivo ZIP...")
-    archivo_descargado = None
-    
-    for _ in range(60): 
-        archivos = [f for f in os.listdir(base_path) 
-                    if not f.lower().endswith('.crdownload') 
-                    and not f.lower().endswith('.tmp') 
-                    and os.path.isfile(os.path.join(base_path, f))]
+    for i in range(total_filas):
+        # Refrescamos la lista de elementos en cada ciclo para que no se "rompan" al hacer clic
+        tr_list = driver.find_elements(By.XPATH, filas_xpath)
+        if i >= len(tr_list):
+            break
         
-        if archivos:
-            time.sleep(2) 
-            archivos_final = [f for f in os.listdir(base_path) 
-                              if not f.lower().endswith('.crdownload') 
-                              and not f.lower().endswith('.tmp') 
-                              and os.path.isfile(os.path.join(base_path, f))]
-            if archivos_final:
-                archivo_descargado = archivos_final[0]
-                break
-        time.sleep(1)
+        fila = tr_list[i]
+        celdas = fila.find_elements(By.TAG_NAME, "td")
+        
+        if len(celdas) < 6:
+            continue
+            
+        estado = celdas[2].text.strip()
+        # Omitimos las ventas que dicen "En curso" porque aún no están cerradas
+        if estado.lower() == "en curso":
+            continue
+            
+        hora_inicio_str = celdas[0].text.strip()
+        cliente_str = celdas[5].text.strip()
+        
+        # Clic en la fila para abrir el panel derecho
+        driver.execute_script("arguments[0].click();", fila)
+        time.sleep(1.5) # Espera rápida para que el panel derecho se dibuje
+        
+        # 1. Obtener el ID de la URL
+        url_actual = driver.current_url
+        id_venta = url_actual.split('/')[-1] if '/' in url_actual else ""
+        
+        # 2. Leer todo el texto del panel derecho
+        try:
+            panel = driver.find_element(By.CSS_SELECTOR, "aside.page__content__aside")
+            texto_panel = panel.text
+        except:
+            texto_panel = ""
+            
+        # 3. Procesar datos del panel con Regex (busca los patrones de texto)
+        origen_match = re.search(r'Origen\s+(.+)', texto_panel)
+        origen = origen_match.group(1).strip() if origen_match else ""
+        
+        pago_match = re.search(r'PAGOS\n(.+?)\s*\$', texto_panel)
+        medio_pago = pago_match.group(1).strip() if pago_match else ""
+        
+        # Extraer productos de la sección ADICIONES
+        try:
+            adic_part = texto_panel.split('ADICIONES')[1]
+            prod_part = adic_part.split('Subtotal')[0]
+            # Limpiamos las líneas vacías
+            productos = [p.strip() for p in prod_part.split('\n') if p.strip()]
+            detalle_productos = " | ".join(productos)
+        except:
+            detalle_productos = ""
+            
+        desc_match = re.search(r'Descuento[^\n]*\s+-?\$?([\d\.\,]+)', texto_panel)
+        descuento = desc_match.group(1) if desc_match else "0"
+        
+        envio_match = re.search(r'Envío[^\n]*\s+\$?([\d\.\,]+)', texto_panel, re.IGNORECASE)
+        costo_envio = envio_match.group(1) if envio_match else "0"
+        
+        total_match = re.search(r'Total:\s+\$?([\d\.\,]+)', texto_panel)
+        total = total_match.group(1) if total_match else "0"
+        
+        # 4. Acomodar fechas y turnos
+        try:
+            # Fudo muestra "25/11/26 23:05:41"
+            dt_obj = datetime.strptime(hora_inicio_str, "%d/%m/%y %H:%M:%S")
+            fecha_texto = dt_obj.strftime("%d/%m/%Y")
+            hora_exacta = dt_obj.strftime("%H:%M")
+            turno = "Mañana" if dt_obj.hour < 16 else "Noche"
+        except:
+            fecha_texto = ""
+            hora_exacta = hora_inicio_str
+            turno = ""
 
-    if not archivo_descargado: 
-        raise Exception("Chrome bloqueó la descarga o el archivo no se guardó a tiempo.")
+        # Agregar el registro al listado final
+        datos_ventas.append({
+            'Id': id_venta,
+            'Fecha_Texto': fecha_texto,
+            'Hora_Exacta': hora_exacta,
+            'Turno': turno,
+            'Cliente': cliente_str,
+            'Total': limpiar_numero(total),
+            'Origen': origen,
+            'Medio de Pago': medio_pago,
+            'Detalle_Productos': detalle_productos,
+            'Descuento_Total': limpiar_numero(descuento),
+            'Costo_Envio': limpiar_numero(costo_envio),
+            'Costo_Total_Venta': 0,
+            'Comision_PeYa_$': 0,
+            'Comision_Tienda_Online_$': 0,
+            'Margen_Neto_$': 0,
+            'Margen_Neto_%': 0,
+            'Costo_MO_$': 0,
+            'Pedidos_en_Turno': 0
+        })
 
-    ruta_descarga = os.path.join(base_path, archivo_descargado)
+    print(f"✅ Se extrajeron {len(datos_ventas)} ventas cerradas correctamente.")
     
-    if archivo_descargado.lower().endswith('.zip'):
-        print("📁 Archivo ZIP descargado exitosamente. Descomprimiendo...")
-        with zipfile.ZipFile(ruta_descarga, 'r') as z:
-            archivo_interno = z.namelist()[0]
-            z.extract(archivo_interno, base_path)
-            if os.path.exists(ruta_excel): os.remove(ruta_excel)
-            shutil.move(os.path.join(base_path, archivo_interno), ruta_excel)
+    # Armar la tabla final en Pandas respetando exactamente el orden pedido
+    columnas_orden = [
+        'Id', 'Fecha_Texto', 'Hora_Exacta', 'Turno', 'Cliente', 'Total', 'Origen', 'Medio de Pago', 
+        'Detalle_Productos', 'Descuento_Total', 'Costo_Envio', 'Costo_Total_Venta', 
+        'Comision_PeYa_$', 'Comision_Tienda_Online_$', 'Margen_Neto_$', 'Margen_Neto_%', 
+        'Costo_MO_$', 'Pedidos_en_Turno'
+    ]
+    
+    if datos_ventas:
+        df_consolidado = pd.DataFrame(datos_ventas, columns=columnas_orden)
+        subir_a_google(df_consolidado)
     else:
-        print("📊 Archivo Excel directo descargado exitosamente.")
-        if os.path.exists(ruta_excel): os.remove(ruta_excel)
-        shutil.move(ruta_descarga, ruta_excel)
-
-    # --- PROCESAMIENTO ---
-    print("--- PASO: PROCESAMIENTO Y LIMPIEZA TOTAL ---")
-    df_v = pd.read_excel(ruta_excel, sheet_name='Ventas', skiprows=3)
-    df_v.columns = df_v.columns.str.strip()
-
-    if pd.api.types.is_datetime64_any_dtype(df_v['Creación']):
-        df_v['Fecha_DT'] = df_v['Creación']
-    else:
-        df_v['Fecha_DT'] = pd.to_datetime(df_v['Creación'], unit='D', origin='1899-12-30', errors='coerce')
-
-    df_v['Fecha_Texto'] = df_v['Fecha_DT'].dt.strftime('%d/%m/%Y')
-    df_v['Hora_Exacta'] = df_v['Fecha_DT'].dt.strftime('%H:%M')
-    df_v['Turno'] = df_v['Fecha_DT'].dt.hour.apply(lambda h: "Mañana" if h < 16 else "Noche")
-
-    hoy = datetime.now().date()
-    df_v = df_v[df_v['Fecha_DT'].dt.date == hoy]
-
-    if df_v.empty:
-        print(f"⚠️ No hay ventas para el día de hoy ({hoy.strftime('%d/%m/%Y')}). Deteniendo ejecución sin error.")
-    else:
-        print(f"✅ Filas de hoy ({hoy.strftime('%d/%m/%Y')}): {len(df_v)}")
-
-        df_a = pd.read_excel(ruta_excel, sheet_name='Adiciones')
-        df_d = pd.read_excel(ruta_excel, sheet_name='Descuentos')
-        df_e = pd.read_excel(ruta_excel, sheet_name='Costos de Envío')
-
-        prod = df_a.groupby('Id. Venta')['Producto'].apply(lambda x: ', '.join(x.astype(str))).reset_index()
-        prod.columns = ['Id', 'Detalle_Productos']
-
-        total_bruto = df_a.groupby('Id. Venta')['Precio'].sum().reset_index()
-        total_bruto.columns = ['Id', 'Total_Productos_Bruto']
-
-        desc = df_d.groupby('Id. Venta')['Valor'].sum().reset_index()
-        desc.columns = ['Id', 'Descuento_Total']
-
-        env = df_e.groupby('Id. Venta')['Valor'].sum().reset_index()
-        env.columns = ['Id', 'Costo_Envio']
-
-        consolidado = df_v[['Id', 'Fecha_Texto', 'Hora_Exacta', 'Turno', 'Cliente', 'Total', 'Origen', 'Medio de Pago']].copy()
-        consolidado = consolidado.merge(prod,        on='Id', how='left')
-        consolidado = consolidado.merge(total_bruto, on='Id', how='left')
-        consolidado = consolidado.merge(desc,        on='Id', how='left')
-        consolidado = consolidado.merge(env,         on='Id', how='left')
-        consolidado = consolidado.fillna(0)
-
-        cols_enteras = ['Id', 'Total', 'Total_Productos_Bruto', 'Descuento_Total', 'Costo_Envio']
-        for col in cols_enteras:
-            if col in consolidado.columns:
-                consolidado[col] = limpiar_a_entero_string(consolidado[col])
-
-        orden = [
-            'Id', 'Fecha_Texto', 'Hora_Exacta', 'Turno', 'Cliente',
-            'Total', 'Origen', 'Medio de Pago', 'Detalle_Productos',
-            'Total_Productos_Bruto', 'Descuento_Total', 'Costo_Envio'
-        ]
-        consolidado = consolidado[orden]
-
-        subir_a_google(consolidado)
+        print("⚠️ No se generó el Excel porque no había ventas cerradas.")
 
 except Exception as e:
-    print(f"❌ ERROR EN SELENIUM:")
+    print(f"❌ ERROR EN EXTRACCIÓN:")
     print(f"Tipo de error: {type(e).__name__}")
-    print(f"URL en el momento del error: {driver.current_url}")
-    print(f"Detalle del error: {e}")
-    
-    print("\n" + "="*50)
-    print("👀 ¿QUÉ ESTÁ VIENDO EL BOT EN LA PANTALLA AHORA MISMO?")
-    print("="*50)
-    try:
-        texto_pantalla = driver.find_element(By.TAG_NAME, "body").text
-        if not texto_pantalla.strip():
-            print("[La pantalla está completamente en blanco]")
-        else:
-            print(texto_pantalla[:3000]) 
-    except Exception as ex:
-        print(f"No se pudo extraer el texto: {ex}")
-    print("="*50 + "\n")
+    print(f"Detalle: {e}")
     
 finally:
     driver.quit()
