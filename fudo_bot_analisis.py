@@ -122,43 +122,31 @@ try:
     except:
         driver.execute_script("arguments[0].click();", export_btn)
 
-    # 2. Espera MUY generosa
-    print("Esperando 25 segundos para que Fudo genere y asigne el link en el servidor...")
-    time.sleep(25) 
+    # 2. Esperar a que el servidor de Fudo lo genere
+    print("Esperando 15 segundos para que Fudo genere el archivo en sus servidores...")
+    time.sleep(15) 
 
-    # 3. Navegación directa a la página de notificaciones
-    print("Navegando directamente al buzón de notificaciones...")
-    driver.get("https://app-v2.fu.do/app/#!/notifications")
-    time.sleep(8) # Dar tiempo a que Angular cargue la tabla
+    # 3. Navegar directamente a la URL de notificaciones (tal como indicaste)
+    print("Navegando directamente a la vista de Notificaciones...")
+    driver.get("https://app-v2.fu.do/app/#!/notifications/")
+    time.sleep(8) # Dar tiempo a que cargue la tabla visible en tu captura
     
-    # 4. Extracción ninja: Buscar el primer enlace de S3 en todo el código fuente visible
-    print("Buscando el enlace de descarga S3 en la página...")
+    # 4. Seleccionar la primera fila de la tabla
+    print("Haciendo clic en la primera notificación de la lista...")
+    # Selecciona el primer <tr> (fila) dentro del <tbody> (cuerpo de la tabla)
+    primera_fila = wait_largo.until(EC.presence_of_element_located((By.XPATH, "(//tbody//tr)[1]")))
+    driver.execute_script("arguments[0].click();", primera_fila)
+    time.sleep(5) # Esperar a que el panel derecho cargue los detalles y reemplace el texto de "Selecciona un elemento..."
     
-    # Extraemos todos los links que haya en la página
-    enlaces = driver.find_elements(By.TAG_NAME, "a")
-    link_url = None
+    # 5. Extraer el link del archivo .zip desde el panel de detalle
+    print("Buscando el enlace del archivo ZIP en el panel de detalles...")
+    download_link = wait_largo.until(EC.presence_of_element_located((By.XPATH, "//a[contains(@href, '.zip') or contains(text(), 'ventas.zip')]")))
+    link_url = download_link.get_attribute("href")
     
-    for enlace in enlaces:
-        href = enlace.get_attribute("href")
-        if href and "fudo-reports.s3" in href and ".zip" in href:
-            link_url = href
-            break
-            
-    if not link_url:
-        print("El enlace no estaba visible a simple vista. Tratando de expandir el primer mensaje...")
-        # Si no lo vemos directo, es porque Fudo obliga a clickear la fila
-        primera_fila = wait_largo.until(EC.presence_of_element_located((By.XPATH, "//tr[contains(@class, 'active')]")))
-        driver.execute_script("arguments[0].click();", primera_fila)
-        time.sleep(5)
-        
-        # Volvemos a buscar en el panel lateral que acaba de abrirse
-        enlace_panel = wait_largo.until(EC.presence_of_element_located((By.CSS_SELECTOR, "a[href*='fudo-reports.s3']")))
-        link_url = enlace_panel.get_attribute("href")
-
-    print(f"¡Enlace de descarga atrapado! Iniciando descarga...")
+    print(f"¡Enlace atrapado con éxito! Iniciando descarga directa...")
     driver.get(link_url)
 
-    # 5. Esperar la descarga física
+    # 6. Esperar la descarga física
     print("Esperando que finalice la descarga del archivo ZIP...")
     archivo_descargado = None
     
