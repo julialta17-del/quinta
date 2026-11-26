@@ -14,7 +14,6 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
-from selenium.webdriver.common.action_chains import ActionChains
 
 # --- CONFIGURACIÓN DE RUTAS ---
 base_path = os.path.join(os.getcwd(), "descargas")
@@ -68,7 +67,6 @@ chrome_options.add_argument('--disable-gpu')
 chrome_options.add_argument('--window-size=1920,1080')
 chrome_options.add_argument('--remote-debugging-port=9222')
 
-# --- CONFIGURACIÓN ANTI-BOTS ---
 chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 chrome_options.add_argument("--disable-blink-features=AutomationControlled")
 chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
@@ -115,6 +113,7 @@ try:
     print("Login enviado, esperando carga de ventas (puede demorar en la nube)...")
     wait_largo = WebDriverWait(driver, 90)
     
+    # 1. Pedir el reporte asíncrono
     export_btn = wait_largo.until(EC.presence_of_element_located((By.CSS_SELECTOR, "a[ng-click='exportSalesAsync()']")))
     time.sleep(3)
     print("Solicitando generación del reporte asíncrono...")
@@ -123,51 +122,44 @@ try:
     except:
         driver.execute_script("arguments[0].click();", export_btn)
 
-    print("Esperando 15 segundos para que el servidor de Fudo genere el reporte...")
-    time.sleep(15) 
+    # 2. Espera MUY generosa
+    print("Esperando 25 segundos para que Fudo genere y asigne el link en el servidor...")
+    time.sleep(25) 
 
-    print("Abriendo el panel de notificaciones (Campanita)...")
-    notif_btn = wait_largo.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "a.icon-system-notifications-navbar")))
+    # 3. Navegación directa a la página de notificaciones
+    print("Navegando directamente al buzón de notificaciones...")
+    driver.get("https://app-v2.fu.do/app/#!/notifications")
+    time.sleep(8) # Dar tiempo a que Angular cargue la tabla
     
-    try:
-        notif_btn.click()
-    except:
-        driver.execute_script("arguments[0].click();", notif_btn)
+    # 4. Extracción ninja: Buscar el primer enlace de S3 en todo el código fuente visible
+    print("Buscando el enlace de descarga S3 en la página...")
     
-    time.sleep(3) 
-
-    print("Yendo a la página completa de 'Ver todas' las notificaciones...")
-    try:
-        ver_todas = driver.find_element(By.XPATH, "//*[contains(text(), 'Ver todas')]")
-        driver.execute_script("arguments[0].click();", ver_todas)
-        time.sleep(5) # Damos tiempo a que cargue la página completa
-    except:
-        print("No se encontró el botón 'Ver todas', continuando...")
-
-    print("Abriendo el detalle de la notificación desde su contenedor principal...")
+    # Extraemos todos los links que haya en la página
+    enlaces = driver.find_elements(By.TAG_NAME, "a")
+    link_url = None
     
-    # Aumentamos el wait a 120 segundos específicamente para la generación del enlace
-    wait_muy_largo = WebDriverWait(driver, 120) 
-    
-    notif_item = wait_muy_largo.until(EC.presence_of_element_located((By.XPATH, "//*[contains(text(), 'reporte de ventas está listo')]")))
-    
-    parent_box = notif_item.find_element(By.XPATH, "..")
-    try:
-        ActionChains(driver).move_to_element(parent_box).click().perform()
-    except:
-        driver.execute_script("arguments[0].click();", parent_box)
+    for enlace in enlaces:
+        href = enlace.get_attribute("href")
+        if href and "fudo-reports.s3" in href and ".zip" in href:
+            link_url = href
+            break
+            
+    if not link_url:
+        print("El enlace no estaba visible a simple vista. Tratando de expandir el primer mensaje...")
+        # Si no lo vemos directo, es porque Fudo obliga a clickear la fila
+        primera_fila = wait_largo.until(EC.presence_of_element_located((By.XPATH, "//tr[contains(@class, 'active')]")))
+        driver.execute_script("arguments[0].click();", primera_fila)
+        time.sleep(5)
         
-    time.sleep(5) 
+        # Volvemos a buscar en el panel lateral que acaba de abrirse
+        enlace_panel = wait_largo.until(EC.presence_of_element_located((By.CSS_SELECTOR, "a[href*='fudo-reports.s3']")))
+        link_url = enlace_panel.get_attribute("href")
 
-    print("Buscando el enlace de descarga S3...")
-    # Ahora también usamos el wait largo para esperar el enlace
-    download_link = wait_muy_largo.until(EC.presence_of_element_located((By.CSS_SELECTOR, "a[href*='fudo-reports.s3']")))
-    
-    link_url = download_link.get_attribute("href")
-    print("¡Enlace encontrado! Iniciando descarga directa...")
+    print(f"¡Enlace de descarga atrapado! Iniciando descarga...")
     driver.get(link_url)
 
-    print("Esperando que finalice la descarga del archivo...")
+    # 5. Esperar la descarga física
+    print("Esperando que finalice la descarga del archivo ZIP...")
     archivo_descargado = None
     
     for _ in range(60): 
@@ -188,7 +180,7 @@ try:
         time.sleep(1)
 
     if not archivo_descargado: 
-        raise Exception("No se descargó ningún archivo.")
+        raise Exception("Chrome bloqueó la descarga o el archivo no se guardó a tiempo.")
 
     ruta_descarga = os.path.join(base_path, archivo_descargado)
     
