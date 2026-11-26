@@ -63,8 +63,7 @@ chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64
 
 driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
 
-# --- CORRECCIÓN DE ZONA HORARIA A ARGENTINA ---
-# Engañamos al navegador en la nube para que renderice Fudo con la hora correcta
+# Engañamos a GitHub para que use la hora de Mendoza, Argentina
 driver.execute_cdp_cmd('Emulation.setTimezoneOverride', {
     'timezoneId': 'America/Argentina/Buenos_Aires'
 })
@@ -111,61 +110,83 @@ try:
         driver.execute_script("arguments[0].scrollIntoView(true);", fila)
         time.sleep(0.5)
         driver.execute_script("arguments[0].click();", fila)
-        time.sleep(2.5) 
+        time.sleep(2.5) # Espera a que el panel lateral derecho se dibuje
         
         url_actual = driver.current_url
         id_venta = url_actual.split('/')[-1] if '/sales/' in url_actual else ""
         
         try:
             panel = driver.find_element(By.CSS_SELECTOR, "aside.page__content__aside")
-            lineas = [l.strip() for l in panel.text.split('\n') if l.strip()]
+            texto_panel = panel.text
         except:
-            lineas = []
+            texto_panel = ""
             
+        # ==========================================
+        # 1. ORIGEN INTELIGENTE
+        # ==========================================
         origen = ""
+        if re.search(r'Tipo\s+Mostrador', texto_panel, re.IGNORECASE):
+            origen = ""
+        elif re.search(r'Tipo\s+Delivery', texto_panel, re.IGNORECASE):
+            origen = "Pedidos Ya"
+        else:
+            origen_match = re.search(r'Origen\s+(.+)', texto_panel)
+            origen = origen_match.group(1).strip() if origen_match else ""
+
+        # ==========================================
+        # 2. MEDIO DE PAGO INTELIGENTE
+        # ==========================================
         medio_pago = ""
-        productos_lista = []
-        descuento = "0"
-        costo_envio = "0"
+        pagos_match = re.search(r'PAGOS\n(.*?)(?=\nPROPINAS|\nTOTAL|\n|$)', texto_panel, re.DOTALL | re.IGNORECASE)
+        if pagos_match:
+            lineas_pagos = [l.strip() for l in pagos_match.group(1).split('\n') if l.strip()]
+            medios = []
+            for l in lineas_pagos:
+                if re.match(r'^\$?\s*[\d\.,]+$', l): continue # Ignorar precios sueltos
+                l_clean = re.sub(r'\s*\$?\s*\d+[\d\.,]*$', '', l).strip() # Quitar el monto final
+                if l_clean:
+                    medios.append(l_clean)
+            medio_pago = " | ".join(medios)
+
+        # ==========================================
+        # 3. DETALLE PRODUCTOS INTELIGENTE
+        # ==========================================
+        detalle_productos = ""
+        adiciones_match = re.search(r'ADICIONES\n(.*?)(?=\nTotal:|\nSubtotal|\nPAGOS)', texto_panel, re.DOTALL | re.IGNORECASE)
+        if adiciones_match:
+            lineas_ad = [l.strip() for l in adiciones_match.group(1).split('\n') if l.strip()]
+            productos_brutos = []
+            for l in lineas_ad:
+                if re.match(r'^\$?\s*[\d\.,]+$', l) and not re.match(r'^\d+$', l):
+                    continue # Ignorar precio suelto
+                l_clean = re.sub(r'\s*\$?\s*\d+[\d\.,]*$', '', l).strip()
+                if l_clean:
+                    productos_brutos.append(l_clean)
+            
+            prod_finales = []
+            temp_qty = ""
+            for p in productos_brutos:
+                if re.match(r'^\d+$', p): 
+                    temp_qty = p # Guarda el número de cantidad
+                else:
+                    if temp_qty:
+                        prod_finales.append(f"{temp_qty} {p}") # Une cantidad + nombre
+                        temp_qty = ""
+                    else:
+                        prod_finales.append(p)
+            detalle_productos = " | ".join(prod_finales)
+
+        # ==========================================
+        # Descuentos y Envíos
+        # ==========================================
+        desc_match = re.search(r'Descuento[^\n]*\s+-?\$?([\d\.\,]+)', texto_panel, re.IGNORECASE)
+        descuento = desc_match.group(1) if desc_match else "0"
         
-        capturando_productos = False
-        capturando_pagos = False
+        envio_match = re.search(r'Envío[^\n]*\s+\$?([\d\.\,]+)', texto_panel, re.IGNORECASE)
+        costo_envio = envio_match.group(1) if envio_match else "0"
         
-        for linea in lineas:
-            if linea.startswith("Origen "):
-                origen = linea.replace("Origen", "").strip()
-            elif linea.startswith("Descuento"):
-                descuento = linea
-            elif linea.startswith("Envío"):
-                costo_envio = linea
-                
-            if linea == "ADICIONES":
-                capturando_productos = True
-                continue
-            if capturando_productos and (linea.startswith("Subtotal") or linea == "PAGOS" or linea == "PROMOCIONES"):
-                capturando_productos = False
-                
-            if capturando_productos:
-                if not re.match(r'^\d+$', linea) and not linea.startswith('$') and not linea.startswith('-'):
-                    if len(linea) > 2:
-                        productos_lista.append(linea)
-                        
-            if linea == "PAGOS":
-                capturando_pagos = True
-                continue
-            if capturando_pagos and (linea == "PROPINAS" or linea.startswith("Total") or linea.startswith("VUELTO")):
-                capturando_pagos = False
-                
-            if capturando_pagos:
-                medio = re.sub(r'\$?\s*[\d\.\,]+$', '', linea).strip()
-                if medio and not re.match(r'^\d+$', medio):
-                    medio_pago = medio
-                    capturando_pagos = False
-                    
-        detalle_productos = " | ".join(productos_lista)
-        
+        # Procesamiento de Fechas
         try:
-            # Ahora este string vendrá con la hora real de Argentina
             dt_obj = datetime.strptime(hora_inicio_str, "%d/%m/%y %H:%M:%S")
             fecha_texto = dt_obj.strftime("%d/%m/%Y")
             hora_exacta = dt_obj.strftime("%H:%M")
@@ -175,6 +196,7 @@ try:
             hora_exacta = hora_inicio_str
             turno = ""
 
+        # Agregar el registro
         datos_ventas.append({
             'Id': id_venta,
             'Fecha_Texto': fecha_texto,
