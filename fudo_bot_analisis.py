@@ -63,7 +63,7 @@ chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64
 
 driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
 
-# Engañamos a GitHub para que use la hora de Mendoza, Argentina
+# Configurar hora Argentina en la nube
 driver.execute_cdp_cmd('Emulation.setTimezoneOverride', {
     'timezoneId': 'America/Argentina/Buenos_Aires'
 })
@@ -86,7 +86,7 @@ try:
     filas_xpath = "//table/tbody/tr"
     filas = driver.find_elements(By.XPATH, filas_xpath)
     total_filas = len(filas)
-    print(f"Se encontraron {total_filas} registros en pantalla. Analizando ventas cerradas...")
+    print(f"Se encontraron {total_filas} registros. Analizando...")
 
     datos_ventas = []
 
@@ -105,87 +105,98 @@ try:
             
         hora_inicio_str = celdas[0].text.strip()
         cliente_str = celdas[5].text.strip()
-        total_str = celdas[7].text.strip() 
         
-        driver.execute_script("arguments[0].scrollIntoView(true);", fila)
+        # 1. Scrolleamos la fila centralmente y hacemos clic
+        driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", fila)
         time.sleep(0.5)
         driver.execute_script("arguments[0].click();", fila)
-        time.sleep(2.5) # Espera a que el panel lateral derecho se dibuje
+        
+        # Esperamos que aparezca el panel lateral y el Total
+        panel = wait_largo.until(EC.presence_of_element_located((By.CSS_SELECTOR, "aside.page__content__aside")))
+        wait_largo.until(EC.presence_of_element_located((By.CSS_SELECTOR, "aside.page__content__aside .total strong")))
+        
+        # 2. SCROLL HASTA EL FINAL DEL PANEL LATERAL
+        # Esto asegura que todas las secciones (como Pagos) carguen completamente
+        driver.execute_script("""
+            var panel = document.querySelector('aside.page__content__aside .content');
+            if (panel) { panel.scrollTo(0, panel.scrollHeight); }
+        """)
+        time.sleep(1.5)
         
         url_actual = driver.current_url
         id_venta = url_actual.split('/')[-1] if '/sales/' in url_actual else ""
         
-        try:
-            panel = driver.find_element(By.CSS_SELECTOR, "aside.page__content__aside")
-            texto_panel = panel.text
-        except:
-            texto_panel = ""
-            
-        # ==========================================
-        # 1. ORIGEN INTELIGENTE
-        # ==========================================
+        # --- EXTRACCIÓN QUIRÚRGICA POR HTML (DOM) ---
         origen = ""
-        if re.search(r'Tipo\s+Mostrador', texto_panel, re.IGNORECASE):
-            origen = ""
-        elif re.search(r'Tipo\s+Delivery', texto_panel, re.IGNORECASE):
-            origen = "Pedidos Ya"
-        else:
-            origen_match = re.search(r'Origen\s+(.+)', texto_panel)
-            origen = origen_match.group(1).strip() if origen_match else ""
-
-        # ==========================================
-        # 2. MEDIO DE PAGO INTELIGENTE
-        # ==========================================
         medio_pago = ""
-        pagos_match = re.search(r'PAGOS\n(.*?)(?=\nPROPINAS|\nTOTAL|\n|$)', texto_panel, re.DOTALL | re.IGNORECASE)
-        if pagos_match:
-            lineas_pagos = [l.strip() for l in pagos_match.group(1).split('\n') if l.strip()]
-            medios = []
-            for l in lineas_pagos:
-                if re.match(r'^\$?\s*[\d\.,]+$', l): continue # Ignorar precios sueltos
-                l_clean = re.sub(r'\s*\$?\s*\d+[\d\.,]*$', '', l).strip() # Quitar el monto final
-                if l_clean:
-                    medios.append(l_clean)
-            medio_pago = " | ".join(medios)
-
-        # ==========================================
-        # 3. DETALLE PRODUCTOS INTELIGENTE
-        # ==========================================
         detalle_productos = ""
-        adiciones_match = re.search(r'ADICIONES\n(.*?)(?=\nTotal:|\nSubtotal|\nPAGOS)', texto_panel, re.DOTALL | re.IGNORECASE)
-        if adiciones_match:
-            lineas_ad = [l.strip() for l in adiciones_match.group(1).split('\n') if l.strip()]
-            productos_brutos = []
-            for l in lineas_ad:
-                if re.match(r'^\$?\s*[\d\.,]+$', l) and not re.match(r'^\d+$', l):
-                    continue # Ignorar precio suelto
-                l_clean = re.sub(r'\s*\$?\s*\d+[\d\.,]*$', '', l).strip()
-                if l_clean:
-                    productos_brutos.append(l_clean)
-            
-            prod_finales = []
-            temp_qty = ""
-            for p in productos_brutos:
-                if re.match(r'^\d+$', p): 
-                    temp_qty = p # Guarda el número de cantidad
-                else:
-                    if temp_qty:
-                        prod_finales.append(f"{temp_qty} {p}") # Une cantidad + nombre
-                        temp_qty = ""
-                    else:
-                        prod_finales.append(p)
-            detalle_productos = " | ".join(prod_finales)
+        descuento = "0"
+        costo_envio = "0"
+        total_venta = "0"
+        
+        # A. TOTAL
+        try:
+            total_venta = panel.find_element(By.CSS_SELECTOR, ".total strong").text
+        except: pass
 
-        # ==========================================
-        # Descuentos y Envíos
-        # ==========================================
-        desc_match = re.search(r'Descuento[^\n]*\s+-?\$?([\d\.\,]+)', texto_panel, re.IGNORECASE)
-        descuento = desc_match.group(1) if desc_match else "0"
-        
-        envio_match = re.search(r'Envío[^\n]*\s+\$?([\d\.\,]+)', texto_panel, re.IGNORECASE)
-        costo_envio = envio_match.group(1) if envio_match else "0"
-        
-        # Procesamiento de Fechas
+        # B. ORIGEN / TIPO
+        try:
+            labels = panel.find_elements(By.CSS_SELECTOR, "ul.list.show li label")
+            for label in labels:
+                texto_label = label.text
+                if "Tipo" in texto_label:
+                    if "Delivery" in texto_label: origen = "Pedidos Ya"
+                    elif "Mostrador" in texto_label: origen = ""
+                if "Origen" in texto_label and "Pedidos" in texto_label:
+                    origen = "Pedidos Ya"
+        except: pass
+
+        # C. ADICIONES (PRODUCTOS)
+        try:
+            adiciones = panel.find_elements(By.CSS_SELECTOR, "ul.additions li.addition")
+            prods = []
+            for ad in adiciones:
+                if "canceled" not in ad.get_attribute("class"):
+                    try:
+                        qty = ad.find_element(By.CSS_SELECTOR, ".count").text.strip()
+                        name = ad.find_element(By.CSS_SELECTOR, ".item-label").text.strip()
+                        # Limpiar nombre por si trae tags extras (como el icono de precio de lista)
+                        name = name.split('\n')[0].strip()
+                        prods.append(f"{qty} {name}".strip())
+                    except: pass
+            detalle_productos = " | ".join(prods)
+        except: pass
+
+        # D. DESCUENTOS Y ENVÍOS
+        try:
+            modifiers = panel.find_elements(By.CSS_SELECTOR, "li.bill-modifier")
+            for mod in modifiers:
+                text = mod.text.lower()
+                try:
+                    price = mod.find_element(By.CSS_SELECTOR, ".price").text
+                    if "descuento" in text:
+                        descuento = price
+                    elif "envío" in text or "envio" in text:
+                        costo_envio = price
+                except: pass
+        except: pass
+
+        # E. MEDIOS DE PAGO
+        try:
+            pagos_seccion = panel.find_element(By.CSS_SELECTOR, "ui-view[name='edit_payments']")
+            pagos_items = pagos_seccion.find_elements(By.CSS_SELECTOR, "li")
+            medios = []
+            for p in pagos_items:
+                if "canceled" not in p.get_attribute("class"):
+                    try:
+                        nombre_pago = p.find_element(By.CSS_SELECTOR, ".item-label").text.strip()
+                        if nombre_pago:
+                            medios.append(nombre_pago)
+                    except: pass
+            medio_pago = " | ".join(medios)
+        except: pass
+
+        # --- FECHAS Y TURNOS ---
         try:
             dt_obj = datetime.strptime(hora_inicio_str, "%d/%m/%y %H:%M:%S")
             fecha_texto = dt_obj.strftime("%d/%m/%Y")
@@ -196,14 +207,14 @@ try:
             hora_exacta = hora_inicio_str
             turno = ""
 
-        # Agregar el registro
+        # --- GUARDAR FILA ---
         datos_ventas.append({
             'Id': id_venta,
             'Fecha_Texto': fecha_texto,
             'Hora_Exacta': hora_exacta,
             'Turno': turno,
             'Cliente': cliente_str,
-            'Total': limpiar_numero(total_str),
+            'Total': limpiar_numero(total_venta),
             'Origen': origen,
             'Medio de Pago': medio_pago,
             'Detalle_Productos': detalle_productos,
@@ -218,7 +229,7 @@ try:
             'Pedidos_en_Turno': ""
         })
 
-    print(f"✅ Se extrajeron {len(datos_ventas)} ventas correctamente.")
+    print(f"✅ Se extrajeron {len(datos_ventas)} ventas cerradas.")
     
     columnas_orden = [
         'Id', 'Fecha_Texto', 'Hora_Exacta', 'Turno', 'Cliente', 'Total', 'Origen', 'Medio de Pago', 
