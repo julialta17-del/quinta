@@ -15,13 +15,15 @@ from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 
 def limpiar_numero(val):
-    if not val: return "0"
-    # Quita puntos de miles, cambia coma por punto para decimales, redondea y devuelve entero en texto
-    v = str(val).replace('$', '').strip().replace('.', '').replace(',', '.')
-    try:
-        return str(int(round(float(v))))
-    except:
-        return "0"
+    if not val or str(val).strip() == "": return "0"
+    match = re.search(r'([\d\.\,]+)', str(val))
+    if match:
+        v = match.group(1).replace('.', '').replace(',', '.')
+        try:
+            return str(int(round(float(v))))
+        except:
+            pass
+    return "0"
 
 def subir_a_google(df_consolidado):
     print("--- PASO: CONEXIÓN A GOOGLE SHEETS ---")
@@ -60,6 +62,13 @@ chrome_options.add_argument('--window-size=1920,1080')
 chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
 
 driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
+
+# --- CORRECCIÓN DE ZONA HORARIA A ARGENTINA ---
+# Engañamos al navegador en la nube para que renderice Fudo con la hora correcta
+driver.execute_cdp_cmd('Emulation.setTimezoneOverride', {
+    'timezoneId': 'America/Argentina/Buenos_Aires'
+})
+
 wait_largo = WebDriverWait(driver, 40)
 
 try:
@@ -73,79 +82,90 @@ try:
     driver.find_element(By.ID, "password").submit()
     
     print("Esperando que cargue la tabla de ventas...")
-    time.sleep(15) # Tiempo para que cargue la info del día
+    time.sleep(15) 
     
     filas_xpath = "//table/tbody/tr"
     filas = driver.find_elements(By.XPATH, filas_xpath)
     total_filas = len(filas)
-    print(f"Se encontraron {total_filas} registros visibles. Analizando uno a uno...")
+    print(f"Se encontraron {total_filas} registros en pantalla. Analizando ventas cerradas...")
 
     datos_ventas = []
 
     for i in range(total_filas):
-        # Refrescamos la lista de elementos en cada ciclo para que no se "rompan" al hacer clic
         tr_list = driver.find_elements(By.XPATH, filas_xpath)
-        if i >= len(tr_list):
-            break
-        
+        if i >= len(tr_list): break
         fila = tr_list[i]
         celdas = fila.find_elements(By.TAG_NAME, "td")
         
-        if len(celdas) < 6:
+        if len(celdas) < 8:
             continue
             
         estado = celdas[2].text.strip()
-        # Omitimos las ventas que dicen "En curso" porque aún no están cerradas
         if estado.lower() == "en curso":
             continue
             
         hora_inicio_str = celdas[0].text.strip()
         cliente_str = celdas[5].text.strip()
+        total_str = celdas[7].text.strip() 
         
-        # Clic en la fila para abrir el panel derecho
+        driver.execute_script("arguments[0].scrollIntoView(true);", fila)
+        time.sleep(0.5)
         driver.execute_script("arguments[0].click();", fila)
-        time.sleep(1.5) # Espera rápida para que el panel derecho se dibuje
+        time.sleep(2.5) 
         
-        # 1. Obtener el ID de la URL
         url_actual = driver.current_url
-        id_venta = url_actual.split('/')[-1] if '/' in url_actual else ""
+        id_venta = url_actual.split('/')[-1] if '/sales/' in url_actual else ""
         
-        # 2. Leer todo el texto del panel derecho
         try:
             panel = driver.find_element(By.CSS_SELECTOR, "aside.page__content__aside")
-            texto_panel = panel.text
+            lineas = [l.strip() for l in panel.text.split('\n') if l.strip()]
         except:
-            texto_panel = ""
+            lineas = []
             
-        # 3. Procesar datos del panel con Regex (busca los patrones de texto)
-        origen_match = re.search(r'Origen\s+(.+)', texto_panel)
-        origen = origen_match.group(1).strip() if origen_match else ""
+        origen = ""
+        medio_pago = ""
+        productos_lista = []
+        descuento = "0"
+        costo_envio = "0"
         
-        pago_match = re.search(r'PAGOS\n(.+?)\s*\$', texto_panel)
-        medio_pago = pago_match.group(1).strip() if pago_match else ""
+        capturando_productos = False
+        capturando_pagos = False
         
-        # Extraer productos de la sección ADICIONES
+        for linea in lineas:
+            if linea.startswith("Origen "):
+                origen = linea.replace("Origen", "").strip()
+            elif linea.startswith("Descuento"):
+                descuento = linea
+            elif linea.startswith("Envío"):
+                costo_envio = linea
+                
+            if linea == "ADICIONES":
+                capturando_productos = True
+                continue
+            if capturando_productos and (linea.startswith("Subtotal") or linea == "PAGOS" or linea == "PROMOCIONES"):
+                capturando_productos = False
+                
+            if capturando_productos:
+                if not re.match(r'^\d+$', linea) and not linea.startswith('$') and not linea.startswith('-'):
+                    if len(linea) > 2:
+                        productos_lista.append(linea)
+                        
+            if linea == "PAGOS":
+                capturando_pagos = True
+                continue
+            if capturando_pagos and (linea == "PROPINAS" or linea.startswith("Total") or linea.startswith("VUELTO")):
+                capturando_pagos = False
+                
+            if capturando_pagos:
+                medio = re.sub(r'\$?\s*[\d\.\,]+$', '', linea).strip()
+                if medio and not re.match(r'^\d+$', medio):
+                    medio_pago = medio
+                    capturando_pagos = False
+                    
+        detalle_productos = " | ".join(productos_lista)
+        
         try:
-            adic_part = texto_panel.split('ADICIONES')[1]
-            prod_part = adic_part.split('Subtotal')[0]
-            # Limpiamos las líneas vacías
-            productos = [p.strip() for p in prod_part.split('\n') if p.strip()]
-            detalle_productos = " | ".join(productos)
-        except:
-            detalle_productos = ""
-            
-        desc_match = re.search(r'Descuento[^\n]*\s+-?\$?([\d\.\,]+)', texto_panel)
-        descuento = desc_match.group(1) if desc_match else "0"
-        
-        envio_match = re.search(r'Envío[^\n]*\s+\$?([\d\.\,]+)', texto_panel, re.IGNORECASE)
-        costo_envio = envio_match.group(1) if envio_match else "0"
-        
-        total_match = re.search(r'Total:\s+\$?([\d\.\,]+)', texto_panel)
-        total = total_match.group(1) if total_match else "0"
-        
-        # 4. Acomodar fechas y turnos
-        try:
-            # Fudo muestra "25/11/26 23:05:41"
+            # Ahora este string vendrá con la hora real de Argentina
             dt_obj = datetime.strptime(hora_inicio_str, "%d/%m/%y %H:%M:%S")
             fecha_texto = dt_obj.strftime("%d/%m/%Y")
             hora_exacta = dt_obj.strftime("%H:%M")
@@ -155,31 +175,29 @@ try:
             hora_exacta = hora_inicio_str
             turno = ""
 
-        # Agregar el registro al listado final
         datos_ventas.append({
             'Id': id_venta,
             'Fecha_Texto': fecha_texto,
             'Hora_Exacta': hora_exacta,
             'Turno': turno,
             'Cliente': cliente_str,
-            'Total': limpiar_numero(total),
+            'Total': limpiar_numero(total_str),
             'Origen': origen,
             'Medio de Pago': medio_pago,
             'Detalle_Productos': detalle_productos,
             'Descuento_Total': limpiar_numero(descuento),
             'Costo_Envio': limpiar_numero(costo_envio),
-            'Costo_Total_Venta': 0,
-            'Comision_PeYa_$': 0,
-            'Comision_Tienda_Online_$': 0,
-            'Margen_Neto_$': 0,
-            'Margen_Neto_%': 0,
-            'Costo_MO_$': 0,
-            'Pedidos_en_Turno': 0
+            'Costo_Total_Venta': "",
+            'Comision_PeYa_$': "",
+            'Comision_Tienda_Online_$': "",
+            'Margen_Neto_$': "",
+            'Margen_Neto_%': "",
+            'Costo_MO_$': "",
+            'Pedidos_en_Turno': ""
         })
 
-    print(f"✅ Se extrajeron {len(datos_ventas)} ventas cerradas correctamente.")
+    print(f"✅ Se extrajeron {len(datos_ventas)} ventas correctamente.")
     
-    # Armar la tabla final en Pandas respetando exactamente el orden pedido
     columnas_orden = [
         'Id', 'Fecha_Texto', 'Hora_Exacta', 'Turno', 'Cliente', 'Total', 'Origen', 'Medio de Pago', 
         'Detalle_Productos', 'Descuento_Total', 'Costo_Envio', 'Costo_Total_Venta', 
