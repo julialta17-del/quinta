@@ -126,21 +126,29 @@ try:
     print("Esperando 15 segundos para que Fudo genere el archivo en sus servidores...")
     time.sleep(15) 
 
-    # 3. Navegar directamente a la URL de notificaciones
-    print("Navegando directamente a la vista de Notificaciones...")
-    driver.get("https://app-v2.fu.do/app/#!/notifications")
-    time.sleep(8) # Dar tiempo a que cargue la tabla
+    # 3. Forzar navegación real a Notificaciones
+    print("Forzando la navegación a la vista de Notificaciones...")
+    # Cambiamos el hash de Angular directamente vía JavaScript para evitar que lo ignore
+    driver.execute_script("window.location.hash = '#!/notifications/';")
+    time.sleep(5)
     
-    # 4. Seleccionar la primera fila de la tabla buscando por su contenido exacto
-    print("Haciendo clic en la fila 'Reporte disponible'...")
-    # Busca la fila (tr) que tenga una celda (td) con el texto "Reporte disponible"
-    primera_fila = wait_largo.until(EC.presence_of_element_located((By.XPATH, "//tr[td[contains(., 'Reporte disponible')]]")))
+    # Si detectamos que Fudo se quedó estancado en ventas, forzamos recarga
+    if "notifications" not in driver.current_url:
+        driver.get("https://app-v2.fu.do/app/#!/notifications/")
+        time.sleep(3)
+        driver.refresh()
+        
+    time.sleep(8) # Dar tiempo a que cargue la tabla principal
+    
+    # 4. Seleccionar la primera fila de la tabla buscando por su contenido
+    print("Haciendo clic en la fila de la tabla 'Reporte disponible'...")
+    primera_fila = wait_largo.until(EC.presence_of_element_located((By.XPATH, "//tr[contains(., 'Reporte disponible')]")))
     driver.execute_script("arguments[0].click();", primera_fila)
     time.sleep(5) # Esperar a que el panel derecho cargue los detalles
     
-    # 5. Extraer el link del archivo .zip desde el panel de detalle derecho
-    print("Buscando el enlace del archivo ZIP en el panel de detalles...")
-    download_link = wait_largo.until(EC.presence_of_element_located((By.XPATH, "//a[contains(@href, '.zip') or contains(text(), 'ventas.zip')]")))
+    # 5. Extraer el link del archivo .zip desde el panel derecho (como en la foto)
+    print("Buscando el enlace del archivo ZIP en el panel derecho...")
+    download_link = wait_largo.until(EC.presence_of_element_located((By.XPATH, "//a[contains(@href, '.zip')]")))
     link_url = download_link.get_attribute("href")
     
     print(f"¡Enlace atrapado con éxito! Iniciando descarga directa...")
