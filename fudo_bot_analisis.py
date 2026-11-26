@@ -126,19 +126,19 @@ try:
     print("Esperando 15 segundos para que Fudo genere el archivo en sus servidores...")
     time.sleep(15) 
 
-    # 3. Navegar directamente a la URL de notificaciones (tal como indicaste)
+    # 3. Navegar directamente a la URL de notificaciones
     print("Navegando directamente a la vista de Notificaciones...")
-    driver.get("https://app-v2.fu.do/app/#!/notifications/")
-    time.sleep(8) # Dar tiempo a que cargue la tabla visible en tu captura
+    driver.get("https://app-v2.fu.do/app/#!/notifications")
+    time.sleep(8) # Dar tiempo a que cargue la tabla
     
-    # 4. Seleccionar la primera fila de la tabla
-    print("Haciendo clic en la primera notificación de la lista...")
-    # Selecciona el primer <tr> (fila) dentro del <tbody> (cuerpo de la tabla)
-    primera_fila = wait_largo.until(EC.presence_of_element_located((By.XPATH, "(//tbody//tr)[1]")))
+    # 4. Seleccionar la primera fila de la tabla buscando por su contenido exacto
+    print("Haciendo clic en la fila 'Reporte disponible'...")
+    # Busca la fila (tr) que tenga una celda (td) con el texto "Reporte disponible"
+    primera_fila = wait_largo.until(EC.presence_of_element_located((By.XPATH, "//tr[td[contains(., 'Reporte disponible')]]")))
     driver.execute_script("arguments[0].click();", primera_fila)
-    time.sleep(5) # Esperar a que el panel derecho cargue los detalles y reemplace el texto de "Selecciona un elemento..."
+    time.sleep(5) # Esperar a que el panel derecho cargue los detalles
     
-    # 5. Extraer el link del archivo .zip desde el panel de detalle
+    # 5. Extraer el link del archivo .zip desde el panel de detalle derecho
     print("Buscando el enlace del archivo ZIP en el panel de detalles...")
     download_link = wait_largo.until(EC.presence_of_element_located((By.XPATH, "//a[contains(@href, '.zip') or contains(text(), 'ventas.zip')]")))
     link_url = download_link.get_attribute("href")
