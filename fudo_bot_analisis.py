@@ -41,12 +41,12 @@ def subir_a_google(consolidado):
     client = gspread.authorize(creds)
 
     try:
-        # ⚠️ AQUÍ DEBES PONER EL ID DE TU GOOGLE SHEET (SÁCALO DE LA URL)
+        # ⚠️ RECUERDA PONER EL ID DE TU GOOGLE SHEET AQUÍ
         spreadsheet = client.open_by_key("PEGA_AQUI_EL_ID_DE_TU_DOCUMENTO")
         sheet_data = spreadsheet.worksheet("Hoja 1")
         sheet_data.clear()
 
-        # Red de seguridad: cualquier numérico que haya escapado se convierte a int string
+        # Red de seguridad para números
         for col in consolidado.select_dtypes(include=['float64', 'float32', 'int64', 'int32']).columns:
             consolidado[col] = consolidado[col].fillna(0).round(0).astype(int).astype(str)
 
@@ -84,13 +84,12 @@ chrome_options.add_experimental_option("prefs", {
 
 driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
 
-# PERMISO FORZADO PARA DESCARGAS EN HEADLESS (CRÍTICO EN GITHUB ACTIONS)
+# PERMISO FORZADO PARA DESCARGAS EN HEADLESS
 driver.execute_cdp_cmd('Page.setDownloadBehavior', {
     'behavior': 'allow',
     'downloadPath': base_path
 })
 
-# Borrar rastros de automatización
 driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
     'source': '''
         Object.defineProperty(navigator, 'webdriver', {
@@ -115,7 +114,6 @@ try:
     driver.find_element(By.ID, "password").submit()
     
     print("Login enviado, esperando carga de ventas (puede demorar en la nube)...")
-    
     wait_largo = WebDriverWait(driver, 90)
     
     # 1. Tocar el botón Exportar
@@ -133,19 +131,39 @@ try:
 
     # 3. Ir a notificaciones (Campanita)
     print("Abriendo el panel de notificaciones...")
-    notif_btn = wait_largo.until(EC.presence_of_element_located((By.CSS_SELECTOR, "a.icon-system-notifications-navbar")))
-    driver.execute_script("arguments[0].click();", notif_btn)
-    time.sleep(3) # Pausa para que se despliegue el menú visualmente
+    notif_btn = wait_largo.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "a.icon-system-notifications-navbar")))
     
-    # 4. Hacer clic en el mensaje de la notificación para abrir el panel lateral
+    # Clic normal para evitar bugs en la página
+    try:
+        notif_btn.click()
+    except:
+        driver.execute_script("arguments[0].click();", notif_btn)
+    
+    time.sleep(3) 
+    
+    # 4. Hacer clic en el mensaje de la notificación
     print("Abriendo el detalle de la notificación...")
     notif_item = wait_largo.until(EC.presence_of_element_located((By.XPATH, "//*[contains(text(), 'reporte de ventas está listo')]")))
-    driver.execute_script("arguments[0].click();", notif_item)
-    time.sleep(3) # Pausa para que se abra el panel lateral (aside)
+    
+    # Usamos clic normal (físico) para que la página de Fudo no crashee
+    try:
+        notif_item.click()
+    except:
+        # Si algo lo tapa, clickeamos su contenedor padre por seguridad
+        driver.execute_script("arguments[0].parentNode.click();", notif_item)
+        
+    time.sleep(5) 
 
-    # 5. Buscar el enlace del reporte dentro del panel lateral ya abierto
-    print("Buscando el enlace de descarga en el panel lateral...")
-    download_link = wait_largo.until(EC.presence_of_element_located((By.XPATH, "//a[contains(@href, 'fudo-reports.s3') and contains(@href, '.zip')]")))
+    # 5. Buscar el enlace de descarga
+    print("Buscando el enlace de descarga en el panel...")
+    try:
+        # Busca cualquier link que vaya al servidor de reportes de Fudo
+        download_link = wait_largo.until(EC.presence_of_element_located((By.CSS_SELECTOR, "a[href*='fudo-reports.s3']")))
+    except Exception as fallback_e:
+        print("⚠️ La pantalla de Fudo se trabó. Refrescando para forzar la carga...")
+        driver.refresh() # Refresca la página en la notificación
+        time.sleep(8)
+        download_link = wait_largo.until(EC.presence_of_element_located((By.CSS_SELECTOR, "a[href*='fudo-reports.s3']")))
     
     link_url = download_link.get_attribute("href")
     print("¡Enlace encontrado! Iniciando descarga directa...")
@@ -162,7 +180,7 @@ try:
                     and os.path.isfile(os.path.join(base_path, f))]
         
         if archivos:
-            time.sleep(2) # Dar tiempo a que termine de escribirse en el disco
+            time.sleep(2) 
             archivos_final = [f for f in os.listdir(base_path) 
                               if not f.lower().endswith('.crdownload') 
                               and not f.lower().endswith('.tmp') 
@@ -173,7 +191,7 @@ try:
         time.sleep(1)
 
     if not archivo_descargado: 
-        raise Exception("No se descargó ningún archivo. Chrome bloqueó la descarga o el enlace expiró.")
+        raise Exception("No se descargó ningún archivo.")
 
     ruta_descarga = os.path.join(base_path, archivo_descargado)
     
@@ -261,11 +279,11 @@ except Exception as e:
     try:
         texto_pantalla = driver.find_element(By.TAG_NAME, "body").text
         if not texto_pantalla.strip():
-            print("[La pantalla está completamente en blanco o tiene un icono de carga]")
+            print("[La pantalla está completamente en blanco]")
         else:
             print(texto_pantalla[:3000]) 
     except Exception as ex:
-        print(f"No se pudo extraer el texto de la pantalla: {ex}")
+        print(f"No se pudo extraer el texto: {ex}")
     print("="*50 + "\n")
     
 finally:
