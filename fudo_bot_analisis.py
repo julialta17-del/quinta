@@ -110,10 +110,9 @@ try:
     driver.find_element(By.ID, "password").send_keys("BigQuinta22")
     driver.find_element(By.ID, "password").submit()
     
-    print("Login enviado, esperando carga de ventas (puede demorar en la nube)...")
+    print("Login enviado, esperando carga de ventas...")
     wait_largo = WebDriverWait(driver, 90)
     
-    # 1. Pedir el reporte asíncrono
     export_btn = wait_largo.until(EC.presence_of_element_located((By.CSS_SELECTOR, "a[ng-click='exportSalesAsync()']")))
     time.sleep(3)
     print("Solicitando generación del reporte asíncrono...")
@@ -122,31 +121,24 @@ try:
     except:
         driver.execute_script("arguments[0].click();", export_btn)
 
-    # 2. Esperar a que el servidor de Fudo lo genere
-    print("Esperando 15 segundos para que Fudo genere el archivo en sus servidores...")
-    time.sleep(15) 
+    print("Esperando 20 segundos para que Fudo genere el archivo...")
+    time.sleep(20) 
 
-    # 3. Forzar navegación real a Notificaciones
-    print("Forzando la navegación a la vista de Notificaciones...")
-    # Cambiamos el hash de Angular directamente vía JavaScript para evitar que lo ignore
-    driver.execute_script("window.location.hash = '#!/notifications/';")
-    time.sleep(5)
+    # --- EL TRUCO PARA FORZAR LA RECARGA ---
+    print("Limpiando el navegador para forzar recarga...")
+    driver.get("about:blank")
+    time.sleep(2)
     
-    # Si detectamos que Fudo se quedó estancado en ventas, forzamos recarga
-    if "notifications" not in driver.current_url:
-        driver.get("https://app-v2.fu.do/app/#!/notifications/")
-        time.sleep(3)
-        driver.refresh()
-        
-    time.sleep(8) # Dar tiempo a que cargue la tabla principal
+    print("Navegando a la vista completa de Notificaciones...")
+    driver.get("https://app-v2.fu.do/app/#!/notifications/")
+    time.sleep(8) 
     
-    # 4. Seleccionar la primera fila de la tabla buscando por su contenido
     print("Haciendo clic en la fila de la tabla 'Reporte disponible'...")
-    primera_fila = wait_largo.until(EC.presence_of_element_located((By.XPATH, "//tr[contains(., 'Reporte disponible')]")))
-    driver.execute_script("arguments[0].click();", primera_fila)
-    time.sleep(5) # Esperar a que el panel derecho cargue los detalles
+    fila = wait_largo.until(EC.presence_of_element_located((By.XPATH, "//tr[contains(., 'Reporte disponible')]")))
+    driver.execute_script("arguments[0].click();", fila)
     
-    # 5. Extraer el link del archivo .zip desde el panel derecho (como en la foto)
+    time.sleep(5) 
+    
     print("Buscando el enlace del archivo ZIP en el panel derecho...")
     download_link = wait_largo.until(EC.presence_of_element_located((By.XPATH, "//a[contains(@href, '.zip')]")))
     link_url = download_link.get_attribute("href")
@@ -154,7 +146,6 @@ try:
     print(f"¡Enlace atrapado con éxito! Iniciando descarga directa...")
     driver.get(link_url)
 
-    # 6. Esperar la descarga física
     print("Esperando que finalice la descarga del archivo ZIP...")
     archivo_descargado = None
     
