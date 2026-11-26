@@ -127,10 +127,15 @@ try:
     time.sleep(15) 
 
     print("Abriendo el panel de notificaciones (Campanita)...")
-    notif_btn = wait_largo.until(EC.presence_of_element_located((By.CSS_SELECTOR, "a.icon-system-notifications-navbar")))
-    driver.execute_script("arguments[0].click();", notif_btn)
-    time.sleep(3)
+    notif_btn = wait_largo.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "a.icon-system-notifications-navbar")))
     
+    try:
+        notif_btn.click()
+    except:
+        driver.execute_script("arguments[0].click();", notif_btn)
+    
+    time.sleep(3) 
+
     print("Yendo a la página completa de 'Ver todas' las notificaciones...")
     try:
         ver_todas = driver.find_element(By.XPATH, "//*[contains(text(), 'Ver todas')]")
@@ -140,20 +145,23 @@ try:
         print("No se encontró el botón 'Ver todas', continuando...")
 
     print("Abriendo el detalle de la notificación desde su contenedor principal...")
-    notif_item = wait_largo.until(EC.presence_of_element_located((By.XPATH, "//*[contains(text(), 'reporte de ventas está listo')]")))
     
-    # Subimos un nivel en la estructura HTML para clickear la "caja" de la notificación
-    # y evitar crashear el sistema de rutas de Angular
+    # Aumentamos el wait a 120 segundos específicamente para la generación del enlace
+    wait_muy_largo = WebDriverWait(driver, 120) 
+    
+    notif_item = wait_muy_largo.until(EC.presence_of_element_located((By.XPATH, "//*[contains(text(), 'reporte de ventas está listo')]")))
+    
     parent_box = notif_item.find_element(By.XPATH, "..")
     try:
         ActionChains(driver).move_to_element(parent_box).click().perform()
     except:
         driver.execute_script("arguments[0].click();", parent_box)
         
-    time.sleep(5) # Pausa para que se despliegue el detalle
+    time.sleep(5) 
 
     print("Buscando el enlace de descarga S3...")
-    download_link = wait_largo.until(EC.presence_of_element_located((By.CSS_SELECTOR, "a[href*='fudo-reports.s3']")))
+    # Ahora también usamos el wait largo para esperar el enlace
+    download_link = wait_muy_largo.until(EC.presence_of_element_located((By.CSS_SELECTOR, "a[href*='fudo-reports.s3']")))
     
     link_url = download_link.get_attribute("href")
     print("¡Enlace encontrado! Iniciando descarga directa...")
