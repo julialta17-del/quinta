@@ -42,7 +42,6 @@ def subir_a_google(consolidado):
 
     try:
         # ⚠️ AQUÍ DEBES PONER EL ID DE TU GOOGLE SHEET (SÁCALO DE LA URL)
-        # Reemplaza "PEGA_AQUI_EL_ID_DE_TU_DOCUMENTO" por el ID real
         spreadsheet = client.open_by_key("PEGA_AQUI_EL_ID_DE_TU_DOCUMENTO")
         sheet_data = spreadsheet.worksheet("Hoja 1")
         sheet_data.clear()
@@ -136,18 +135,23 @@ try:
     print("Abriendo el panel de notificaciones...")
     notif_btn = wait_largo.until(EC.presence_of_element_located((By.CSS_SELECTOR, "a.icon-system-notifications-navbar")))
     driver.execute_script("arguments[0].click();", notif_btn)
-    
     time.sleep(3) # Pausa para que se despliegue el menú visualmente
     
-    # 4. Buscar el enlace del reporte dentro de las notificaciones
-    print("Buscando el enlace de descarga (ventas.zip) en las notificaciones...")
-    download_link = wait_largo.until(EC.presence_of_element_located((By.XPATH, "//a[contains(text(), 'ventas.zip')]")))
+    # 4. Hacer clic en el mensaje de la notificación para abrir el panel lateral
+    print("Abriendo el detalle de la notificación...")
+    notif_item = wait_largo.until(EC.presence_of_element_located((By.XPATH, "//*[contains(text(), 'reporte de ventas está listo')]")))
+    driver.execute_script("arguments[0].click();", notif_item)
+    time.sleep(3) # Pausa para que se abra el panel lateral (aside)
+
+    # 5. Buscar el enlace del reporte dentro del panel lateral ya abierto
+    print("Buscando el enlace de descarga en el panel lateral...")
+    download_link = wait_largo.until(EC.presence_of_element_located((By.XPATH, "//a[contains(@href, 'fudo-reports.s3') and contains(@href, '.zip')]")))
     
     link_url = download_link.get_attribute("href")
     print("¡Enlace encontrado! Iniciando descarga directa...")
     driver.get(link_url)
 
-    # 5. Esperar a que el archivo se guarde físicamente
+    # 6. Esperar a que el archivo se guarde físicamente
     print("Esperando que finalice la descarga del archivo...")
     archivo_descargado = None
     
